@@ -574,7 +574,7 @@ function App() {
                         </span>
                       </div>
                     </td>
-                    <td className="size-col">
+                    <td className="size-col numeric">
                       {t.totalBytes ? size(t.totalBytes) : messages.unknown}
                     </td>
                     <td className="progress-col numeric">
