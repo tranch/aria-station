@@ -354,7 +354,7 @@ function App() {
         <section className="metrics">
           <div className="metric">
             <span className="metric-icon blue">
-              <Icon name="download" />
+              <Icon name="down-arrow-alt" />
             </span>
             <div>
               <p>{messages.downloadSpeed}</p>
@@ -363,7 +363,7 @@ function App() {
           </div>
           <div className="metric">
             <span className="metric-icon teal">
-              <Icon name="upload" />
+              <Icon name="up-arrow-alt" />
             </span>
             <div>
               <p>{messages.uploadSpeed}</p>
