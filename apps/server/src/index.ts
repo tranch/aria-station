@@ -104,9 +104,12 @@ function task(status: AriaStatus) {
     completed >= total &&
     status.status === "active";
   const file = status.files?.[0]?.path?.split("/").pop();
-  const folder = status.dir?.startsWith(`${downloadRoot}/`)
-    ? status.dir.slice(downloadRoot.length + 1)
-    : (status.dir ?? "downloads");
+  const folder =
+    status.dir === downloadRoot
+      ? "downloads"
+      : status.dir?.startsWith(`${downloadRoot}/`)
+        ? status.dir.slice(downloadRoot.length + 1)
+        : (status.dir ?? "downloads");
   return {
     id: status.gid,
     name: file || status.gid,
@@ -131,7 +134,7 @@ function downloadDirectory(folder: unknown) {
       "Choose one of the configured download directories",
     );
   }
-  return `${downloadRoot}/${folder}`;
+  return folder === "downloads" ? downloadRoot : `${downloadRoot}/${folder}`;
 }
 
 function validUri(value: unknown): value is string {

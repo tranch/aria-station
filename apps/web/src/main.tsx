@@ -742,8 +742,9 @@ function App() {
                       <div>
                         <span>{messages.directoryOnDownloadEngine}</span>
                         <strong>
-                          {"/downloads/"}
-                          {current.folder}
+                          {current.folder === "downloads"
+                            ? "/downloads"
+                            : `/downloads/${current.folder}`}
                         </strong>
                       </div>
                       <div>
