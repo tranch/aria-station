@@ -583,6 +583,7 @@ tbody tr.selected {
   align-items: center;
   gap: 16px;
   border-bottom: 1px solid var(--border);
+  background: #f7f8fa;
   padding: 0 16px;
 }
 .tabs {
@@ -598,22 +599,35 @@ tbody tr.selected {
   position: relative;
   font-size: 14px;
   color: var(--muted);
+  font-weight: 500;
 }
 .tabs button.active {
-  color: #2e4d7d;
+  color: #1f4381;
+  font-weight: 650;
+  background: var(--surface);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-bottom-color: var(--surface);
+  border-radius: 4px 4px 0 0;
+  margin-top: 5px;
+  margin-bottom: -1px;
 }
 .tabs button.active:after {
   content: "";
   position: absolute;
-  bottom: 0;
+  bottom: -1px;
   left: 0;
   right: 0;
-  height: 2px;
-  background: var(--accent);
+  height: 3px;
+  background: var(--surface);
+  z-index: 1;
 }
 .tabs small {
   color: var(--muted);
   font-size: 11px;
+}
+.tabs button.active small {
+  color: #1f4381;
 }
 .detail-name {
   margin-left: auto;
@@ -937,7 +951,7 @@ dialog::backdrop {
 .peer-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) auto;
+  grid-template-columns: 22px 22px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 8px 0;
@@ -954,6 +968,10 @@ dialog::backdrop {
 .peer-row span {
   color: var(--muted);
   font-size: 12px;
+}
+.file-row small {
+  white-space: nowrap;
+  text-align: right;
 }
 .peer-list {
   width: 100%;
