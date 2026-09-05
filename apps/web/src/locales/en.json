@@ -48,6 +48,7 @@
   "addURLsOrATorrentFile": "Add URLs or a torrent file.",
   "closeDialog": "Close dialog",
   "downloadURLs": "Download URLs",
+  "torrentFile": "Torrent file",
   "chooseOrDropATorrentFile": "Choose or drop a torrent file",
   "torrentUpTo10MB": ".torrent · Up to 10 MB",
   "downloadDirectory": "Download directory",

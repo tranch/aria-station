@@ -54,7 +54,6 @@ function App() {
     [notice, setNotice] = useState(""),
     [offline, setOffline] = useState(true),
     [sort, setSort] = useState(false),
-    [advanced, setAdvanced] = useState(false),
     [torrent, setTorrent] = useState<File | null>(null),
     [height, setHeight] = useState(258),
     [details, setDetails] = useState<TaskDetails | null>(null),
@@ -926,25 +925,28 @@ function App() {
               />
               <small>{messages.urlInputHelp}</small>
             </label>
-            <label
-              className="dropzone"
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(e) => {
-                e.preventDefault();
-                chooseFile(e.dataTransfer.files[0]);
-              }}
-            >
-              <Icon name="cloud-upload" />
-              <strong>
-                {torrent ? torrent.name : messages.chooseOrDropATorrentFile}
-              </strong>
-              <small>{messages.torrentUpTo10MB}</small>
-              <input
-                type="file"
-                accept=".torrent"
-                onChange={(e) => chooseFile(e.target.files?.[0])}
-              />
-            </label>
+            <div className="dropzone-field">
+              <span className="dropzone-label">{messages.torrentFile}</span>
+              <label
+                className="dropzone"
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  chooseFile(e.dataTransfer.files[0]);
+                }}
+              >
+                <Icon name="cloud-upload" />
+                <strong>
+                  {torrent ? torrent.name : messages.chooseOrDropATorrentFile}
+                </strong>
+                <small>{messages.torrentUpTo10MB}</small>
+                <input
+                  type="file"
+                  accept=".torrent"
+                  onChange={(e) => chooseFile(e.target.files?.[0])}
+                />
+              </label>
+            </div>
             <label className="field">
               {messages.downloadDirectory}
               <select
@@ -960,17 +962,6 @@ function App() {
                 )}
               </select>
             </label>
-            <button
-              className="advanced"
-              type="button"
-              onClick={() => setAdvanced(!advanced)}
-            >
-              <Icon name={advanced ? "chevron-down" : "chevron-right"} />
-              {messages.advancedOptions}
-            </button>
-            {advanced && (
-              <p className="hint">{messages.advancedOptionsUnavailable}</p>
-            )}
             <div className="modal-footer">
               <span>{messages.noFilesWillBeDownloaded}</span>
               <button type="button" onClick={() => setModal(null)}>
