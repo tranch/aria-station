@@ -1,0 +1,9 @@
+# UI development preview only; aria2 integration is not implemented yet.
+services:
+  web:
+    build:
+      context: .
+      dockerfile: deploy/docker/Dockerfile.dev
+    ports:
+      - "127.0.0.1:5173:5173"
+    init: true

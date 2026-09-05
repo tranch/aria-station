@@ -1,0 +1,18 @@
+{
+  "name": "aria2-download-station",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w apps/web -- --host 127.0.0.1",
+    "build": "npm run build -w apps/web",
+    "typecheck": "npm run typecheck -w apps/web",
+    "preview": "npm run preview -w apps/web -- --host 0.0.0.0",
+    "format": "prettier --write apps/web/src apps/web/*.json apps/web/index.html package.json compose.yaml"
+  },
+  "devDependencies": {
+    "prettier": "3.6.2"
+  }
+}
