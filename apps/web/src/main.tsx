@@ -57,14 +57,14 @@ function App() {
     [torrent, setTorrent] = useState<File | null>(null),
     [height, setHeight] = useState(258),
     [details, setDetails] = useState<TaskDetails | null>(null),
-    [limit, setLimit] = useState(""),
+    [downloadLimit, setDownloadLimit] = useState(""),
     [health, setHealth] = useState<Health | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     document.title = product.documentTitle;
   }, []);
   useEffect(() => {
-    if (!detail || (tab !== "files" && tab !== "connections")) return;
+    if (!detail) return;
     setDetails(null);
     fetch(`/api/tasks/${detail}/details`)
       .then(async (response) => {
@@ -74,7 +74,6 @@ function App() {
         if (!response.ok)
           throw new Error(body.error ?? "Unable to load task details");
         setDetails(body);
-        setLimit(body.options.maxDownloadLimit ? String(body.options.maxDownloadLimit) : "");
       })
       .catch((error: unknown) =>
         notify(
@@ -156,7 +155,8 @@ function App() {
       body: JSON.stringify(body),
     });
     const result = (await response.json()) as { error?: string };
-    if (!response.ok) throw new Error(result.error ?? "Unable to update task options");
+    if (!response.ok)
+      throw new Error(result.error ?? "Unable to update task options");
     notify("Task options updated.");
     setTab("files");
     setDetails(null);
@@ -228,7 +228,15 @@ function App() {
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ uris: lines, folder, torrentBase64 }),
+        body: JSON.stringify({
+          uris: lines,
+          folder,
+          torrentBase64,
+          maxDownloadLimit:
+            downloadLimit.trim() === ""
+              ? 0
+              : Math.round(Number(downloadLimit) * 1_000_000),
+        }),
       });
       const body = (await response.json()) as {
         gids?: string[];
@@ -243,6 +251,7 @@ function App() {
       setModal(null);
       setInput("");
       setTorrent(null);
+      setDownloadLimit("");
       notify(downloadsAdded(body.gids.length));
       await refreshTasks();
     } catch (error) {
@@ -739,37 +748,15 @@ function App() {
                             : messages.waitingForMetadata}
                         </strong>
                       </div>
-                      <form
-                        onSubmit={(e) => e.preventDefault()}
-                      >
-                        <label htmlFor="download-limit">{messages.downloadLimit}</label>
-                        <div className="inline-field">
-                          <input
-                            id="download-limit"
-                            type="number"
-                            min="0"
-                            max="1000000000"
-                            step="1"
-                            inputMode="numeric"
-                            aria-label={messages.downloadLimit}
-                            placeholder="0"
-                            value={limit}
-                            onChange={(e) => setLimit(e.target.value)}
-                            onBlur={() => {
-                              const bytes = limit.trim() === "" ? 0 : Number(limit);
-                              if (!Number.isInteger(bytes) || bytes < 0 || bytes > 1_000_000_000) {
-                                notify("Enter a whole number between 0 and 1,000,000,000.");
-                                return;
-                              }
-                              if (!detail || (details?.options.maxDownloadLimit ?? 0) === bytes) return;
-                              void saveOptions({ maxDownloadLimit: bytes }).catch((error: unknown) =>
-                                notify(error instanceof Error ? error.message : "Unable to update task options"),
-                              );
-                            }}
-                          />
-                          <span>bytes/s</span>
-                        </div>
-                      </form>
+                      <div>
+                        <span>{messages.downloadLimit}</span>
+                        <strong>
+                          {((details?.options.maxDownloadLimit ?? 0) / 1_000_000).toLocaleString(undefined, {
+                            maximumFractionDigits: 2,
+                          })}{" "}
+                          <span className="unit">Mb/s</span>
+                        </strong>
+                      </div>
                       <div>
                         <span>{messages.downloadSpeed}</span>
                         <strong>{rate(current.speed)}</strong>
@@ -806,22 +793,8 @@ function App() {
                       ? messages.loadingDetails
                       : details.files.length === 0
                         ? messages.noFiles
-                            : details.files.map((file) => (
+                        : details.files.map((file) => (
                             <label className="file-row" key={file.index}>
-                              <input
-                                type="checkbox"
-                                checked={file.selected}
-                                aria-label={`Select ${file.path}`}
-                                onChange={(e) => {
-                                  const indexes = details.files
-                                    .filter((item) => item.selected || item.index === file.index && e.target.checked)
-                                    .filter((item) => item.index !== file.index || e.target.checked)
-                                    .map((item) => item.index);
-                                  void saveOptions({ selectedFileIndexes: indexes }).catch((error: unknown) =>
-                                    notify(error instanceof Error ? error.message : "Unable to update file selection"),
-                                  );
-                                }}
-                              />
                               <Icon
                                 name={file.selected ? "file" : "file-blank"}
                               />
@@ -961,6 +934,22 @@ function App() {
                   ),
                 )}
               </select>
+            </label>
+            <label className="field">
+              {messages.downloadLimit}
+              <div className="inline-field">
+                <input
+                  type="number"
+                  min="0"
+                  max="1000"
+                  step="0.01"
+                  inputMode="decimal"
+                  placeholder="0"
+                  value={downloadLimit}
+                  onChange={(e) => setDownloadLimit(e.target.value)}
+                />
+                <span className="unit">Mb/s</span>
+              </div>
             </label>
             <div className="modal-footer">
               <span>{messages.noFilesWillBeDownloaded}</span>

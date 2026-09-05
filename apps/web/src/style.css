@@ -722,6 +722,9 @@ tbody tr.selected {
 .inline-field span {
   white-space: nowrap;
 }
+.unit {
+  font-weight: 400;
+}
 .detail-grid span {
   font-size: 12px;
   color: var(--muted);
@@ -986,7 +989,7 @@ dialog::backdrop {
 .peer-row {
   width: 100%;
   display: grid;
-  grid-template-columns: 22px 22px minmax(0, 1fr) auto;
+  grid-template-columns: 22px minmax(0, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 8px 0;

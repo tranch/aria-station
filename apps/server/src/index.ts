@@ -204,7 +204,10 @@ app.get<{ Params: { gid: string } }>(
       },
       files: files.map((file) => ({
         index: number(file.index),
-        path: file.path,
+        path:
+          status.dir && file.path.startsWith(`${status.dir}/`)
+            ? file.path.slice(status.dir.length + 1)
+            : file.path.split("/").pop() ?? file.path,
         totalBytes: number(file.length),
         completedBytes: number(file.completedLength),
         selected: file.selected === "true",
@@ -250,9 +253,9 @@ app.patch<{
 });
 
 app.post<{
-  Body: { uris?: unknown; folder?: unknown; torrentBase64?: unknown };
+  Body: { uris?: unknown; folder?: unknown; torrentBase64?: unknown; maxDownloadLimit?: unknown };
 }>("/api/tasks", async (request, reply) => {
-  const { uris = [], folder, torrentBase64 } = request.body ?? {};
+  const { uris = [], folder, torrentBase64, maxDownloadLimit = 0 } = request.body ?? {};
   if (!Array.isArray(uris) || !uris.every(validUri))
     throw new HttpError(
       400,
@@ -265,7 +268,17 @@ app.post<{
     throw new HttpError(400, "The torrent file is invalid or exceeds 10 MB");
   if (!uris.length && !torrentBase64)
     throw new HttpError(400, "Provide at least one URL or torrent file");
-  const options = { dir: downloadDirectory(folder) };
+  if (
+    typeof maxDownloadLimit !== "number" ||
+    !Number.isInteger(maxDownloadLimit) ||
+    maxDownloadLimit < 0 ||
+    maxDownloadLimit > 1_000_000_000
+  )
+    throw new HttpError(400, "Download limit must be a whole number of bytes per second");
+  const options = {
+    dir: downloadDirectory(folder),
+    "max-download-limit": String(maxDownloadLimit),
+  };
   const gids = await Promise.all(
     uris.map((uri) => rpc<string>("addUri", [[uri], options])),
   );
