@@ -76,6 +76,7 @@
   "paused": "Paused",
   "completed": "Completed",
   "failed": "Failed",
+  "removed": "Removed",
   "seeding": "Seeding",
   "overview": "Overview",
   "files": "Files",

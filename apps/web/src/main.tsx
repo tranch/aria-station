@@ -16,17 +16,17 @@ import React, { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
 import "boxicons/css/boxicons.min.css";
 import "./style.css";
-import { initialTasks, states, size, type Task, type Status } from "./data";
+import { eta, rate, states, size, type Task } from "./data";
 import { product } from "./product";
 const Icon = ({ name }: { name: string }) => (
   <i className={`bx bx-${name}`} aria-hidden="true" />
 );
 function App() {
-  const [tasks, setTasks] = useState<Task[]>(initialTasks),
+  const [tasks, setTasks] = useState<Task[]>([]),
     [filter, setFilter] = useState("all"),
     [query, setQuery] = useState(""),
-    [selected, setSelected] = useState<string[]>(["a01"]),
-    [detail, setDetail] = useState("a01"),
+    [selected, setSelected] = useState<string[]>([]),
+    [detail, setDetail] = useState(""),
     [tab, setTab] = useState("overview"),
     [collapsed, setCollapsed] = useState(() => window.innerWidth < 768),
     [drawer, setDrawer] = useState(false),
@@ -34,7 +34,7 @@ function App() {
     [input, setInput] = useState(""),
     [folder, setFolder] = useState("downloads"),
     [notice, setNotice] = useState(""),
-    [offline, setOffline] = useState(false),
+    [offline, setOffline] = useState(true),
     [sort, setSort] = useState(false),
     [advanced, setAdvanced] = useState(false),
     [torrent, setTorrent] = useState<File | null>(null),
@@ -52,6 +52,25 @@ function App() {
     const timer = setTimeout(() => setNotice(""), 3500);
     return () => clearTimeout(timer);
   }, [notice]);
+  const refreshTasks = async () => {
+    try {
+      const response = await fetch("/api/tasks");
+      const body = (await response.json()) as { tasks?: Task[]; error?: string };
+      if (!response.ok || !body.tasks) throw new Error(body.error ?? "Unable to load downloads");
+      setTasks(body.tasks);
+      setSelected((previous) => previous.filter((id) => body.tasks!.some((task) => task.id === id)));
+      setDetail((previous) => body.tasks!.some((task) => task.id === previous) ? previous : "");
+      setOffline(false);
+    } catch (error) {
+      setOffline(true);
+      if (error instanceof Error && !tasks.length) setNotice(error.message);
+    }
+  };
+  useEffect(() => {
+    void refreshTasks();
+    const timer = window.setInterval(() => void refreshTasks(), 2_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const visible = tasks
     .filter(
       (t) =>
@@ -67,37 +86,14 @@ function App() {
     ),
     upload = tasks.reduce((n, t) => n + t.upload, 0);
   const notify = (s: string) => setNotice(s);
-  const change = (action: "pause" | "start") => {
-    let count = 0;
-    setTasks(
-      tasks.map((t) => {
-        if (
-          selected.includes(t.id) &&
-          ((action === "pause" &&
-            ["active", "waiting", "seeding"].includes(t.status)) ||
-            (action === "start" &&
-              ["paused", "waiting", "error"].includes(t.status)))
-        ) {
-          count++;
-          return {
-            ...t,
-            status:
-              action === "pause"
-                ? "paused"
-                : t.progress === 100 && t.type === "BT"
-                  ? "seeding"
-                  : "active",
-            speed: action === "pause" || t.progress === 100 ? 0 : 2.4,
-            upload:
-              action === "start" && t.progress === 100 && t.type === "BT"
-                ? 1.2
-                : 0,
-          };
-        }
-        return t;
-      }),
-    );
-    notify(downloadAction(action, count));
+  const change = async (action: "pause" | "start") => {
+    const eligible = picked.filter((task) => action === "pause" ? ["active", "waiting", "seeding"].includes(task.status) : task.status === "paused");
+    const results = await Promise.allSettled(eligible.map((task) => fetch(`/api/tasks/${task.id}/${action === "pause" ? "pause" : "resume"}`, { method: "POST" }).then(async (response) => {
+      if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? "aria2 rejected the operation");
+    })));
+    const succeeded = results.filter((result) => result.status === "fulfilled").length;
+    notify(downloadAction(action, succeeded));
+    await refreshTasks();
   };
   const toggle = (id: string) =>
     setSelected(
@@ -105,7 +101,7 @@ function App() {
         ? selected.filter((x) => x !== id)
         : [...selected, id],
     );
-  function add() {
+  async function add() {
     const lines = input
       .split("\n")
       .map((s) => s.trim())
@@ -128,45 +124,29 @@ function App() {
       notify(messages.invalidDownloadUrl);
       return;
     }
-    const names = lines.map((s) => {
-      const u = new URL(s);
-      try {
-        return u.protocol === "magnet:"
-          ? u.searchParams.get("dn") || messages.magnetMetadata
-          : decodeURIComponent(u.pathname.split("/").pop() || u.hostname);
-      } catch {
-        return u.hostname;
-      }
-    });
-    if (torrent) names.push(torrent.name);
-    const created = names.map(
-      (name, i): Task => ({
-        id: crypto.randomUUID(),
-        name,
-        size: 0,
-        progress: 0,
-        status: "waiting",
-        speed: 0,
-        upload: 0,
-        type:
-          i < lines.length
-            ? lines[i].startsWith("magnet:")
-              ? "BT"
-              : "HTTP"
-            : "BT",
-        folder,
-        peers: 0,
-      }),
-    );
-    setTasks([...created, ...tasks]);
-    setFilter("all");
-    setQuery("");
-    setSelected([created[0].id]);
-    setDetail(created[0].id);
-    setModal(null);
-    setInput("");
-    setTorrent(null);
-    notify(downloadsAdded(created.length));
+    try {
+      const torrentBase64 = torrent
+        ? btoa(Array.from(new Uint8Array(await torrent.arrayBuffer()), (byte) => String.fromCharCode(byte)).join(""))
+        : undefined;
+      const response = await fetch("/api/tasks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ uris: lines, folder, torrentBase64 }),
+      });
+      const body = (await response.json()) as { gids?: string[]; error?: string };
+      if (!response.ok || !body.gids) throw new Error(body.error ?? "aria2 rejected the download");
+      setFilter("all");
+      setQuery("");
+      setSelected(body.gids);
+      setDetail(body.gids[0]);
+      setModal(null);
+      setInput("");
+      setTorrent(null);
+      notify(downloadsAdded(body.gids.length));
+      await refreshTasks();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Unable to add download.");
+    }
   }
   function chooseFile(file?: File) {
     if (!file) return;
@@ -280,7 +260,7 @@ function App() {
             <span className="demo-badge">{messages.demo}</span>
             <button
               className="connection"
-              onClick={() => setOffline(!offline)}
+              onClick={() => void refreshTasks()}
               title={messages.toggleOfflineDemo}
             >
               <span className={offline ? "dot muted" : "dot"} />
@@ -316,7 +296,7 @@ function App() {
             <div>
               <p>{messages.downloadSpeed}</p>
               <strong>
-                {offline ? "—" : download.toFixed(2)} <small>MB/s</small>
+                {offline ? "—" : rate(download)}
               </strong>
             </div>
           </div>
@@ -327,7 +307,7 @@ function App() {
             <div>
               <p>{messages.uploadSpeed}</p>
               <strong>
-                {offline ? "—" : upload.toFixed(2)} <small>MB/s</small>
+                {offline ? "—" : rate(upload)}
               </strong>
             </div>
           </div>
@@ -537,7 +517,7 @@ function App() {
                       </div>
                     </td>
                     <td className="size-col">
-                      {t.size ? size(t.size) : messages.unknown}
+                      {t.totalBytes ? size(t.totalBytes) : messages.unknown}
                     </td>
                     <td>
                       <div className={`progress ${t.status}`}>
@@ -554,14 +534,10 @@ function App() {
                       </span>
                     </td>
                     <td className="speed-col numeric">
-                      {t.status === "active"
-                        ? `${t.speed.toFixed(2)} MB/s`
-                        : "—"}
+                      {t.status === "active" ? rate(t.speed) : "—"}
                     </td>
                     <td className="eta-col">
-                      {t.status === "active"
-                        ? `${Math.max(1, Math.round((t.size * 1024 * (1 - t.progress / 100)) / t.speed / 60))} min`
-                        : "—"}
+                      {t.status === "active" ? eta(t) : "—"}
                     </td>
                     <td className="folder-col">
                       <span className="folder">
@@ -689,20 +665,20 @@ function App() {
                       </span>
                     </div>
                     {current.status === "error" && (
-                      <p className="error-message">{messages.diskWriteError}</p>
+                      <p className="error-message">{current.errorMessage ?? messages.diskWriteError}</p>
                     )}
                     <div className="detail-grid">
                       <div>
                         <span>{messages.downloadedTotal}</span>
                         <strong>
-                          {current.size
-                            ? `${size((current.size * current.progress) / 100)} / ${size(current.size)}`
+                          {current.totalBytes
+                            ? `${size(current.completedBytes)} / ${size(current.totalBytes)}`
                             : messages.waitingForMetadata}
                         </strong>
                       </div>
                       <div>
                         <span>{messages.downloadSpeed}</span>
-                        <strong>{current.speed.toFixed(2)} MB/s</strong>
+                        <strong>{rate(current.speed)}</strong>
                       </div>
                       <div>
                         <span>
@@ -721,7 +697,7 @@ function App() {
                       </div>
                       <div>
                         <span>{messages.uploadSpeed}</span>
-                        <strong>{current.upload.toFixed(2)} MB/s</strong>
+                        <strong>{rate(current.upload)}</strong>
                       </div>
                       <div>
                         <span>{messages.created}</span>
@@ -733,7 +709,7 @@ function App() {
                   <div className="file-detail">
                     <Icon name="file" />
                     <span>{current.name}</span>
-                    <span>{size(current.size)}</span>
+                    <span>{size(current.totalBytes)}</span>
                     <span>{current.progress}%</span>
                     <p>{messages.sampleFilesDescription}</p>
                   </div>
@@ -760,9 +736,9 @@ function App() {
           </span>
           <span>
             <Icon name="down-arrow-alt" />
-            {offline ? "—" : download.toFixed(2)} MB/s{" "}
+            {offline ? "—" : rate(download)}{" "}
             <Icon name="up-arrow-alt" />
-            {offline ? "—" : upload.toFixed(2)} MB/s
+            {offline ? "—" : rate(upload)}
           </span>
         </footer>
       </main>
@@ -880,12 +856,14 @@ function App() {
               <button onClick={() => setModal(null)}>{messages.cancel}</button>
               <button
                 className="danger"
-                onClick={() => {
-                  setTasks(tasks.filter((t) => !selected.includes(t.id)));
-                  setSelected([]);
-                  if (selected.includes(detail)) setDetail("");
+                onClick={async () => {
+                  const results = await Promise.allSettled(selected.map((id) => fetch(`/api/tasks/${id}`, { method: "DELETE" }).then(async (response) => {
+                    if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? "aria2 rejected removal");
+                  })));
+                  const succeeded = results.filter((result) => result.status === "fulfilled").length;
                   setModal(null);
-                  notify(messages.downloadsRemovedFilesOnDiskAreUnchanged);
+                  notify(succeeded === selected.length ? messages.downloadsRemovedFilesOnDiskAreUnchanged : `${succeeded} of ${selected.length} downloads removed.`);
+                  await refreshTasks();
                 }}
               >
                 {messages.removeDownloads}
@@ -895,35 +873,17 @@ function App() {
         ) : (
           <div className="settings">
             <p>{messages.demoPersistenceHelp}</p>
-            <button onClick={() => setOffline(!offline)}>
+            <button onClick={() => void refreshTasks()}>
               <Icon name="wifi-off" />
               {offline
                 ? messages.restoreDemoConnection
                 : messages.simulateDisconnection}
             </button>
-            <button
-              onClick={() => {
-                setTasks([]);
-                setSelected([]);
-                setDetail("");
-                setModal(null);
-              }}
-            >
+            <button onClick={() => setModal(null)}>
               <Icon name="inbox" />
               {messages.showEmptyList}
             </button>
-            <button
-              onClick={() => {
-                setTasks(initialTasks);
-                setSelected(["a01"]);
-                setDetail("a01");
-                setFilter("all");
-                setQuery("");
-                setOffline(false);
-                setModal(null);
-                notify(messages.demoDataReset);
-              }}
-            >
+            <button onClick={() => void refreshTasks()}>
               <Icon name="reset" />
               {messages.resetDemoData}
             </button>

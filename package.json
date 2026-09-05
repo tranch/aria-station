@@ -3,12 +3,14 @@
   "private": true,
   "version": "0.1.0",
   "workspaces": [
-    "apps/web"
+    "apps/web",
+    "apps/server"
   ],
   "scripts": {
     "dev": "npm run dev -w apps/web -- --host 127.0.0.1",
-    "build": "npm run build -w apps/web",
-    "typecheck": "npm run typecheck -w apps/web",
+    "dev:server": "npm run dev -w apps/server",
+    "build": "npm run build -w apps/web && npm run build -w apps/server",
+    "typecheck": "npm run typecheck -w apps/web && npm run typecheck -w apps/server",
     "preview": "npm run preview -w apps/web -- --host 0.0.0.0",
     "format": "prettier --write apps/web/src apps/web/*.json apps/web/index.html package.json compose.yaml"
   },
