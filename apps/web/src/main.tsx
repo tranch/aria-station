@@ -22,6 +22,7 @@ const Icon = ({ name }: { name: string }) => (
   <i className={`bx bx-${name}`} aria-hidden="true" />
 );
 type TaskDetails = {
+  options: { maxDownloadLimit: number };
   files: Array<{
     index: number;
     path: string;
@@ -57,6 +58,7 @@ function App() {
     [torrent, setTorrent] = useState<File | null>(null),
     [height, setHeight] = useState(258),
     [details, setDetails] = useState<TaskDetails | null>(null),
+    [limit, setLimit] = useState(""),
     [health, setHealth] = useState<Health | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -73,6 +75,7 @@ function App() {
         if (!response.ok)
           throw new Error(body.error ?? "Unable to load task details");
         setDetails(body);
+        setLimit(body.options.maxDownloadLimit ? String(body.options.maxDownloadLimit) : "");
       })
       .catch((error: unknown) =>
         notify(
@@ -146,6 +149,20 @@ function App() {
     ),
     upload = tasks.reduce((n, t) => n + t.upload, 0);
   const notify = (s: string) => setNotice(s);
+  const saveOptions = async (body: Record<string, unknown>) => {
+    if (!detail) return;
+    const response = await fetch(`/api/tasks/${detail}/options`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const result = (await response.json()) as { error?: string };
+    if (!response.ok) throw new Error(result.error ?? "Unable to update task options");
+    notify("Task options updated.");
+    setTab("files");
+    setDetails(null);
+    await refreshTasks();
+  };
   const change = async (action: "pause" | "start") => {
     const eligible = picked.filter((task) =>
       action === "pause"
@@ -723,6 +740,37 @@ function App() {
                             : messages.waitingForMetadata}
                         </strong>
                       </div>
+                      <form
+                        onSubmit={(e) => e.preventDefault()}
+                      >
+                        <label htmlFor="download-limit">{messages.downloadLimit}</label>
+                        <div className="inline-field">
+                          <input
+                            id="download-limit"
+                            type="number"
+                            min="0"
+                            max="1000000000"
+                            step="1"
+                            inputMode="numeric"
+                            aria-label={messages.downloadLimit}
+                            placeholder="0"
+                            value={limit}
+                            onChange={(e) => setLimit(e.target.value)}
+                            onBlur={() => {
+                              const bytes = limit.trim() === "" ? 0 : Number(limit);
+                              if (!Number.isInteger(bytes) || bytes < 0 || bytes > 1_000_000_000) {
+                                notify("Enter a whole number between 0 and 1,000,000,000.");
+                                return;
+                              }
+                              if (!detail || (details?.options.maxDownloadLimit ?? 0) === bytes) return;
+                              void saveOptions({ maxDownloadLimit: bytes }).catch((error: unknown) =>
+                                notify(error instanceof Error ? error.message : "Unable to update task options"),
+                              );
+                            }}
+                          />
+                          <span>bytes/s</span>
+                        </div>
+                      </form>
                       <div>
                         <span>{messages.downloadSpeed}</span>
                         <strong>{rate(current.speed)}</strong>
@@ -759,8 +807,22 @@ function App() {
                       ? messages.loadingDetails
                       : details.files.length === 0
                         ? messages.noFiles
-                        : details.files.map((file) => (
-                            <div className="file-row" key={file.index}>
+                            : details.files.map((file) => (
+                            <label className="file-row" key={file.index}>
+                              <input
+                                type="checkbox"
+                                checked={file.selected}
+                                aria-label={`Select ${file.path}`}
+                                onChange={(e) => {
+                                  const indexes = details.files
+                                    .filter((item) => item.selected || item.index === file.index && e.target.checked)
+                                    .filter((item) => item.index !== file.index || e.target.checked)
+                                    .map((item) => item.index);
+                                  void saveOptions({ selectedFileIndexes: indexes }).catch((error: unknown) =>
+                                    notify(error instanceof Error ? error.message : "Unable to update file selection"),
+                                  );
+                                }}
+                              />
                               <Icon
                                 name={file.selected ? "file" : "file-blank"}
                               />
@@ -769,7 +831,7 @@ function App() {
                                 {size(file.completedBytes)} /{" "}
                                 {size(file.totalBytes)}
                               </small>
-                            </div>
+                            </label>
                           ))}
                   </div>
                 ) : (

@@ -51,6 +51,8 @@
   "chooseOrDropATorrentFile": "Choose or drop a torrent file",
   "torrentUpTo10MB": ".torrent · Up to 10 MB",
   "downloadDirectory": "Download directory",
+  "downloadLimit": "Task download limit",
+  "save": "Save",
   "advancedOptions": "Advanced options",
   "noFilesWillBeDownloaded": "Downloads will be added to aria2.",
   "cancel": "Cancel",

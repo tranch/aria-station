@@ -668,6 +668,31 @@ tbody tr.selected {
   gap: 5px;
   min-width: 0;
 }
+.detail-grid form {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+.detail-grid form > label {
+  color: var(--muted);
+  font-size: 12px;
+}
+.inline-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.inline-field input {
+  width: 92px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+}
+.inline-field span {
+  white-space: nowrap;
+}
 .detail-grid span {
   font-size: 12px;
   color: var(--muted);

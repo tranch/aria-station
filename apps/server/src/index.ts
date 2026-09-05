@@ -39,6 +39,7 @@ type AriaPeer = {
   uploadSpeed: string;
   seeder: "true" | "false";
 };
+type AriaOptions = { "max-download-limit"?: string; dir?: string };
 
 const rpcUrl = process.env.ARIA2_RPC_URL ?? "http://127.0.0.1:6800/jsonrpc";
 const rpcSecret = process.env.ARIA2_RPC_SECRET;
@@ -196,7 +197,11 @@ app.get<{ Params: { gid: string } }>(
     const peers = status.bittorrent
       ? await rpc<AriaPeer[]>("getPeers", [request.params.gid])
       : [];
+    const options = await rpc<AriaOptions>("getOption", [request.params.gid]);
     return {
+      options: {
+        maxDownloadLimit: number(options["max-download-limit"]),
+      },
       files: files.map((file) => ({
         index: number(file.index),
         path: file.path,
@@ -214,6 +219,35 @@ app.get<{ Params: { gid: string } }>(
     };
   },
 );
+
+app.patch<{
+  Params: { gid: string };
+  Body: { selectedFileIndexes?: unknown; maxDownloadLimit?: unknown };
+}>("/api/tasks/:gid/options", async (request) => {
+  const body = request.body ?? {};
+  const options: Record<string, string> = {};
+  if (body.maxDownloadLimit !== undefined) {
+    if (
+      typeof body.maxDownloadLimit !== "number" ||
+      !Number.isInteger(body.maxDownloadLimit) ||
+      body.maxDownloadLimit < 0 ||
+      body.maxDownloadLimit > 1_000_000_000
+    )
+      throw new HttpError(400, "Download limit must be a whole number of bytes per second");
+    options["max-download-limit"] = String(body.maxDownloadLimit);
+  }
+  if (body.selectedFileIndexes !== undefined) {
+    if (
+      !Array.isArray(body.selectedFileIndexes) ||
+      !body.selectedFileIndexes.every((index) => Number.isInteger(index) && index > 0)
+    )
+      throw new HttpError(400, "Selected file indexes are invalid");
+    options["select-file"] = body.selectedFileIndexes.join(",");
+  }
+  if (!Object.keys(options).length) throw new HttpError(400, "No task options provided");
+  await rpc<string>("changeOption", [request.params.gid, options]);
+  return { gid: request.params.gid, options };
+});
 
 app.post<{
   Body: { uris?: unknown; folder?: unknown; torrentBase64?: unknown };
