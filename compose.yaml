@@ -1,4 +1,4 @@
-# UI development preview only; aria2 integration is not implemented yet.
+# UI development preview only. Run the service and aria2 on the host for RPC tests.
 services:
   web:
     build:

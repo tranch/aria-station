@@ -21,6 +21,23 @@ import { product } from "./product";
 const Icon = ({ name }: { name: string }) => (
   <i className={`bx bx-${name}`} aria-hidden="true" />
 );
+type TaskDetails = {
+  files: Array<{
+    index: number;
+    path: string;
+    totalBytes: number;
+    completedBytes: number;
+    selected: boolean;
+  }>;
+  peers: Array<{
+    address: string;
+    client: string;
+    downloadSpeed: number;
+    uploadSpeed: number;
+    seeder: boolean;
+  }>;
+};
+type Health = { connected: true; version: string };
 function App() {
   const [tasks, setTasks] = useState<Task[]>([]),
     [filter, setFilter] = useState("all"),
@@ -38,11 +55,46 @@ function App() {
     [sort, setSort] = useState(false),
     [advanced, setAdvanced] = useState(false),
     [torrent, setTorrent] = useState<File | null>(null),
-    [height, setHeight] = useState(258);
+    [height, setHeight] = useState(258),
+    [details, setDetails] = useState<TaskDetails | null>(null),
+    [health, setHealth] = useState<Health | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     document.title = product.documentTitle;
   }, []);
+  useEffect(() => {
+    if (!detail || (tab !== "files" && tab !== "connections")) return;
+    setDetails(null);
+    fetch(`/api/tasks/${detail}/details`)
+      .then(async (response) => {
+        const body = (await response.json()) as TaskDetails & {
+          error?: string;
+        };
+        if (!response.ok)
+          throw new Error(body.error ?? "Unable to load task details");
+        setDetails(body);
+      })
+      .catch((error: unknown) =>
+        notify(
+          error instanceof Error
+            ? error.message
+            : "Unable to load task details",
+        ),
+      );
+  }, [detail, tab]);
+  useEffect(() => {
+    if (modal !== "settings") return;
+    setHealth(null);
+    fetch("/api/health")
+      .then(async (response) => {
+        const body = (await response.json()) as Health & { error?: string };
+        if (!response.ok) throw new Error(body.error ?? "aria2 is unreachable");
+        setHealth(body);
+      })
+      .catch((error: unknown) =>
+        notify(error instanceof Error ? error.message : "aria2 is unreachable"),
+      );
+  }, [modal]);
   useEffect(() => {
     if (modal) dialog.current?.showModal();
     else dialog.current?.close();
@@ -55,11 +107,19 @@ function App() {
   const refreshTasks = async () => {
     try {
       const response = await fetch("/api/tasks");
-      const body = (await response.json()) as { tasks?: Task[]; error?: string };
-      if (!response.ok || !body.tasks) throw new Error(body.error ?? "Unable to load downloads");
+      const body = (await response.json()) as {
+        tasks?: Task[];
+        error?: string;
+      };
+      if (!response.ok || !body.tasks)
+        throw new Error(body.error ?? "Unable to load downloads");
       setTasks(body.tasks);
-      setSelected((previous) => previous.filter((id) => body.tasks!.some((task) => task.id === id)));
-      setDetail((previous) => body.tasks!.some((task) => task.id === previous) ? previous : "");
+      setSelected((previous) =>
+        previous.filter((id) => body.tasks!.some((task) => task.id === id)),
+      );
+      setDetail((previous) =>
+        body.tasks!.some((task) => task.id === previous) ? previous : "",
+      );
       setOffline(false);
     } catch (error) {
       setOffline(true);
@@ -87,11 +147,28 @@ function App() {
     upload = tasks.reduce((n, t) => n + t.upload, 0);
   const notify = (s: string) => setNotice(s);
   const change = async (action: "pause" | "start") => {
-    const eligible = picked.filter((task) => action === "pause" ? ["active", "waiting", "seeding"].includes(task.status) : task.status === "paused");
-    const results = await Promise.allSettled(eligible.map((task) => fetch(`/api/tasks/${task.id}/${action === "pause" ? "pause" : "resume"}`, { method: "POST" }).then(async (response) => {
-      if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? "aria2 rejected the operation");
-    })));
-    const succeeded = results.filter((result) => result.status === "fulfilled").length;
+    const eligible = picked.filter((task) =>
+      action === "pause"
+        ? ["active", "waiting", "seeding"].includes(task.status)
+        : task.status === "paused",
+    );
+    const results = await Promise.allSettled(
+      eligible.map((task) =>
+        fetch(
+          `/api/tasks/${task.id}/${action === "pause" ? "pause" : "resume"}`,
+          { method: "POST" },
+        ).then(async (response) => {
+          if (!response.ok)
+            throw new Error(
+              ((await response.json()) as { error?: string }).error ??
+                "aria2 rejected the operation",
+            );
+        }),
+      ),
+    );
+    const succeeded = results.filter(
+      (result) => result.status === "fulfilled",
+    ).length;
     notify(downloadAction(action, succeeded));
     await refreshTasks();
   };
@@ -126,15 +203,23 @@ function App() {
     }
     try {
       const torrentBase64 = torrent
-        ? btoa(Array.from(new Uint8Array(await torrent.arrayBuffer()), (byte) => String.fromCharCode(byte)).join(""))
+        ? btoa(
+            Array.from(new Uint8Array(await torrent.arrayBuffer()), (byte) =>
+              String.fromCharCode(byte),
+            ).join(""),
+          )
         : undefined;
       const response = await fetch("/api/tasks", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ uris: lines, folder, torrentBase64 }),
       });
-      const body = (await response.json()) as { gids?: string[]; error?: string };
-      if (!response.ok || !body.gids) throw new Error(body.error ?? "aria2 rejected the download");
+      const body = (await response.json()) as {
+        gids?: string[];
+        error?: string;
+      };
+      if (!response.ok || !body.gids)
+        throw new Error(body.error ?? "aria2 rejected the download");
       setFilter("all");
       setQuery("");
       setSelected(body.gids);
@@ -145,7 +230,9 @@ function App() {
       notify(downloadsAdded(body.gids.length));
       await refreshTasks();
     } catch (error) {
-      notify(error instanceof Error ? error.message : "Unable to add download.");
+      notify(
+        error instanceof Error ? error.message : "Unable to add download.",
+      );
     }
   }
   function chooseFile(file?: File) {
@@ -204,21 +291,6 @@ function App() {
           ))}
         </nav>
         <div className="sidebar-bottom">
-          <div className="storage">
-            <div>
-              <Icon name="hdd" />
-              <strong>{messages.storage}</strong>
-              <span className="demo-small">{messages.sample}</span>
-            </div>
-            <div className="storage-track">
-              <span />
-            </div>
-            <p>
-              <strong>{"1.28 TB"}</strong>
-              {" / 4 TB"}
-              <span>32%</span>
-            </p>
-          </div>
           <button className="nav-item" onClick={() => setModal("settings")}>
             <Icon name="cog" />
             <span>{messages.settings}</span>
@@ -228,8 +300,8 @@ function App() {
               <Icon name="server" />
             </span>
             <div>
-              <strong>{messages.homeNAS}</strong>
-              <small>{messages.demoInstance}</small>
+              <strong>{messages.aria2Engine}</strong>
+              <small>{offline ? messages.offline : messages.connected}</small>
             </div>
             <span className={offline ? "dot muted" : "dot"} />
           </div>
@@ -243,40 +315,14 @@ function App() {
         />
       )}
       <main>
-        <header>
-          <div className="breadcrumb">
-            <button
-              className="icon-button menu"
-              aria-label={messages.openNavigation}
-              onClick={() => setDrawer(true)}
-            >
-              <Icon name="menu" />
-            </button>
-            {messages.workspace}
-            <Icon name="chevron-right" />
-            <strong>{messages.downloads}</strong>
-          </div>
-          <div className="header-right">
-            <span className="demo-badge">{messages.demo}</span>
-            <button
-              className="connection"
-              onClick={() => void refreshTasks()}
-              title={messages.toggleOfflineDemo}
-            >
-              <span className={offline ? "dot muted" : "dot"} />
-              {offline ? messages.offline : messages.connectedDemo}
-            </button>
-            <span className="header-divider" />
-            <button
-              className="avatar"
-              aria-label={messages.account}
-              onClick={() => notify(messages.accountUnavailable)}
-            >
-              A
-            </button>
-          </div>
-        </header>
         <section className="page-heading">
+          <button
+            className="icon-button menu"
+            aria-label={messages.openNavigation}
+            onClick={() => setDrawer(true)}
+          >
+            <Icon name="menu" />
+          </button>
           <div>
             <h1>
               {nav.find((n) => n[0] === filter)?.[1]}
@@ -295,9 +341,7 @@ function App() {
             </span>
             <div>
               <p>{messages.downloadSpeed}</p>
-              <strong>
-                {offline ? "—" : rate(download)}
-              </strong>
+              <strong>{offline ? "—" : rate(download)}</strong>
             </div>
           </div>
           <div className="metric">
@@ -306,9 +350,7 @@ function App() {
             </span>
             <div>
               <p>{messages.uploadSpeed}</p>
-              <strong>
-                {offline ? "—" : rate(upload)}
-              </strong>
+              <strong>{offline ? "—" : rate(upload)}</strong>
             </div>
           </div>
           <div className="metric summary">
@@ -332,8 +374,7 @@ function App() {
             {messages.connectionLost}
             <button
               onClick={() => {
-                setOffline(false);
-                notify(messages.demoConnectionRestored);
+                void refreshTasks();
               }}
             >
               {messages.reconnect}
@@ -519,7 +560,7 @@ function App() {
                     <td className="size-col">
                       {t.totalBytes ? size(t.totalBytes) : messages.unknown}
                     </td>
-                    <td>
+                    <td className="progress-col numeric">
                       <div className={`progress ${t.status}`}>
                         <span style={{ width: `${t.progress}%` }} />
                       </div>
@@ -536,7 +577,7 @@ function App() {
                     <td className="speed-col numeric">
                       {t.status === "active" ? rate(t.speed) : "—"}
                     </td>
-                    <td className="eta-col">
+                    <td className="eta-col numeric">
                       {t.status === "active" ? eta(t) : "—"}
                     </td>
                     <td className="folder-col">
@@ -576,7 +617,9 @@ function App() {
             </span>
             <span>
               <span className="dot" />
-              {messages.demoDataChangesAreNotSaved}
+              {offline
+                ? messages.connectionDataMayBeStale
+                : messages.engineDataRefreshed}
             </span>
           </div>
         </section>
@@ -623,7 +666,9 @@ function App() {
                     }}
                   >
                     {detailTabs[s as keyof typeof detailTabs]}
-                    {s === "files" && <small>1</small>}
+                    {s === "files" && details && (
+                      <small>{details.files.length}</small>
+                    )}
                   </button>
                 ))}
               </div>
@@ -665,7 +710,9 @@ function App() {
                       </span>
                     </div>
                     {current.status === "error" && (
-                      <p className="error-message">{current.errorMessage ?? messages.diskWriteError}</p>
+                      <p className="error-message">
+                        {current.errorMessage ?? messages.diskWriteError}
+                      </p>
                     )}
                     <div className="detail-grid">
                       <div>
@@ -686,7 +733,11 @@ function App() {
                             ? messages.peers
                             : messages.connections}
                         </span>
-                        <strong>{connectionCount(current.peers)}</strong>
+                        <strong>
+                          {current.type === "BT"
+                            ? peerCount(current.peers)
+                            : connectionCount(current.peers)}
+                        </strong>
                       </div>
                       <div>
                         <span>{messages.directoryOnDownloadEngine}</span>
@@ -699,29 +750,51 @@ function App() {
                         <span>{messages.uploadSpeed}</span>
                         <strong>{rate(current.upload)}</strong>
                       </div>
-                      <div>
-                        <span>{messages.created}</span>
-                        <strong>{messages.sampleCreatedAt}</strong>
-                      </div>
                     </div>
                   </>
                 ) : tab === "files" ? (
                   <div className="file-detail">
-                    <Icon name="file" />
-                    <span>{current.name}</span>
-                    <span>{size(current.totalBytes)}</span>
-                    <span>{current.progress}%</span>
-                    <p>{messages.sampleFilesDescription}</p>
+                    {!details
+                      ? messages.loadingDetails
+                      : details.files.length === 0
+                        ? messages.noFiles
+                        : details.files.map((file) => (
+                            <div className="file-row" key={file.index}>
+                              <Icon
+                                name={file.selected ? "file" : "file-blank"}
+                              />
+                              <span>{file.path}</span>
+                              <small>
+                                {size(file.completedBytes)} /{" "}
+                                {size(file.totalBytes)}
+                              </small>
+                            </div>
+                          ))}
                   </div>
                 ) : (
                   <div className="connection-detail">
                     <Icon name="transfer-alt" />
-                    <h3>
-                      {current.type === "BT"
-                        ? peerCount(current.peers)
-                        : connectionCount(current.peers)}
-                    </h3>
-                    <p>{messages.connectionsUnavailable}</p>
+                    {!details ? (
+                      <p>{messages.loadingDetails}</p>
+                    ) : current.type !== "BT" ? (
+                      <p>{messages.peersOnlyForBitTorrent}</p>
+                    ) : details.peers.length === 0 ? (
+                      <p>{messages.noPeers}</p>
+                    ) : (
+                      <div className="peer-list">
+                        {details.peers.map((peer) => (
+                          <div className="peer-row" key={peer.address}>
+                            <strong>{peer.address}</strong>
+                            <span>{peer.client || messages.unknownClient}</span>
+                            <small>
+                              {rate(peer.downloadSpeed)} ↓ ·{" "}
+                              {rate(peer.uploadSpeed)} ↑
+                              {peer.seeder ? ` · ${messages.seeder}` : ""}
+                            </small>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -732,12 +805,11 @@ function App() {
           <span>
             <Icon name="server" />
             {product.name}{" "}
-            <span className="footer-version">{messages.prototypeVersion}</span>
+            <span className="footer-version">{messages.version}</span>
           </span>
           <span>
             <Icon name="down-arrow-alt" />
-            {offline ? "—" : rate(download)}{" "}
-            <Icon name="up-arrow-alt" />
+            {offline ? "—" : rate(download)} <Icon name="up-arrow-alt" />
             {offline ? "—" : rate(upload)}
           </span>
         </footer>
@@ -761,7 +833,7 @@ function App() {
             <p>
               {modal === "add"
                 ? messages.addURLsOrATorrentFile
-                : messages.demoSettings}
+                : messages.engineDiagnostics}
             </p>
           </div>
           <button
@@ -857,12 +929,28 @@ function App() {
               <button
                 className="danger"
                 onClick={async () => {
-                  const results = await Promise.allSettled(selected.map((id) => fetch(`/api/tasks/${id}`, { method: "DELETE" }).then(async (response) => {
-                    if (!response.ok) throw new Error(((await response.json()) as { error?: string }).error ?? "aria2 rejected removal");
-                  })));
-                  const succeeded = results.filter((result) => result.status === "fulfilled").length;
+                  const results = await Promise.allSettled(
+                    selected.map((id) =>
+                      fetch(`/api/tasks/${id}`, { method: "DELETE" }).then(
+                        async (response) => {
+                          if (!response.ok)
+                            throw new Error(
+                              ((await response.json()) as { error?: string })
+                                .error ?? "aria2 rejected removal",
+                            );
+                        },
+                      ),
+                    ),
+                  );
+                  const succeeded = results.filter(
+                    (result) => result.status === "fulfilled",
+                  ).length;
                   setModal(null);
-                  notify(succeeded === selected.length ? messages.downloadsRemovedFilesOnDiskAreUnchanged : `${succeeded} of ${selected.length} downloads removed.`);
+                  notify(
+                    succeeded === selected.length
+                      ? messages.downloadsRemovedFilesOnDiskAreUnchanged
+                      : `${succeeded} of ${selected.length} downloads removed.`,
+                  );
                   await refreshTasks();
                 }}
               >
@@ -872,22 +960,21 @@ function App() {
           </>
         ) : (
           <div className="settings">
-            <p>{messages.demoPersistenceHelp}</p>
-            <button onClick={() => void refreshTasks()}>
-              <Icon name="wifi-off" />
-              {offline
-                ? messages.restoreDemoConnection
-                : messages.simulateDisconnection}
+            <p>
+              {health
+                ? `${messages.engineConnected} aria2 ${health.version}`
+                : messages.checkingEngine}
+            </p>
+            <button
+              onClick={() => {
+                void refreshTasks();
+                setModal(null);
+              }}
+            >
+              <Icon name="refresh" />
+              {messages.refreshConnection}
             </button>
-            <button onClick={() => setModal(null)}>
-              <Icon name="inbox" />
-              {messages.showEmptyList}
-            </button>
-            <button onClick={() => void refreshTasks()}>
-              <Icon name="reset" />
-              {messages.resetDemoData}
-            </button>
-            <p className="hint">{messages.settingsUnavailable}</p>
+            <p className="hint">{messages.settingsComingSoon}</p>
           </div>
         )}
       </dialog>
