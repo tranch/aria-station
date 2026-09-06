@@ -1,10 +1,9 @@
 /**
  * Product identity is intentionally kept outside the UI components.
- * Replace these values when the project receives its final name.
+ * Centralized product identity used throughout the UI.
  */
 export const product = {
-  name: "aria2 Download Station",
-  shortName: "aria2",
-  subtitle: "DOWNLOAD STATION",
-  documentTitle: "aria2 · Download Station",
+  name: "Aria Station",
+  shortName: "Aria Station",
+  documentTitle: "Aria Station",
 } as const;

@@ -3,6 +3,7 @@ import fastifyStatic from "@fastify/static";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { WebSocket, WebSocketServer } from "ws";
 
 type AriaStatus = {
   gid: string;
@@ -17,6 +18,8 @@ type AriaStatus = {
   bittorrent?: unknown;
   numSeeders?: string;
   connections?: string;
+  followedBy?: string[];
+  following?: string;
 };
 
 type RpcReply<T> = {
@@ -125,6 +128,8 @@ function task(status: AriaStatus) {
     folder,
     peers: number(status.numSeeders ?? status.connections),
     errorMessage: status.errorMessage,
+    followedBy: status.followedBy ?? [],
+    following: status.following,
   };
 }
 
@@ -150,6 +155,24 @@ function validUri(value: unknown): value is string {
 }
 
 const app = Fastify({ logger: true });
+const events = new WebSocketServer({ noServer: true });
+
+events.on("connection", (client) => {
+  const upstreamUrl = rpcUrl.replace(/^http/, "ws");
+  const upstream = new WebSocket(upstreamUrl);
+  const close = () => {
+    if (upstream.readyState === WebSocket.OPEN) upstream.close();
+    if (client.readyState === WebSocket.OPEN) client.close();
+  };
+  upstream.on("message", (message) => {
+    if (client.readyState === WebSocket.OPEN) client.send(message.toString());
+  });
+  upstream.on("error", close);
+  upstream.on("close", close);
+  client.on("close", () => {
+    if (upstream.readyState === WebSocket.OPEN) upstream.close();
+  });
+});
 
 app.setErrorHandler((error, _request, reply) => {
   const statusCode = error instanceof HttpError ? error.statusCode : 500;
@@ -177,6 +200,8 @@ app.get("/api/tasks", async () => {
     "bittorrent",
     "numSeeders",
     "connections",
+    "followedBy",
+    "following",
   ];
   const [active, waiting, stopped] = await Promise.all([
     rpc<AriaStatus[]>("tellActive", [fields]),
@@ -310,6 +335,16 @@ app.delete<{ Params: { gid: string } }>("/api/tasks/:gid", async (request) => {
     ? "removeDownloadResult"
     : "remove";
   return { gid: await rpc<string>(method, [request.params.gid]) };
+});
+
+app.server.on("upgrade", (request, socket, head) => {
+  if (request.url !== "/api/events") {
+    socket.destroy();
+    return;
+  }
+  events.handleUpgrade(request, socket, head, (client) =>
+    events.emit("connection", client, request),
+  );
 });
 
 const webDist = resolve(

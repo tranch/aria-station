@@ -14,6 +14,8 @@ export type Task = {
   folder: string;
   peers: number;
   errorMessage?: string;
+  followedBy?: string[];
+  following?: string;
 };
 export const states: Record<Status, { label: string; icon: string }> = {
   active: { label: messages.downloading, icon: "down-arrow-circle" },

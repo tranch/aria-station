@@ -98,14 +98,6 @@ input[type="checkbox"] {
 .brand-icon .bx {
   font-size: 31px;
 }
-.brand-sub {
-  display: block;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 1px;
-  color: var(--muted);
-  margin-top: 3px;
-}
 .workspace-label {
   display: flex;
   justify-content: space-between;

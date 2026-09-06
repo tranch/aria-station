@@ -64,6 +64,23 @@ function App() {
     document.title = product.documentTitle;
   }, []);
   useEffect(() => {
+    let socket: WebSocket | undefined;
+    let retry = 1_000;
+    let stopped = false;
+    const connect = () => {
+      socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/events`);
+      socket.onopen = () => { retry = 1_000; };
+      socket.onmessage = () => { void refreshTasks(); };
+      socket.onclose = () => {
+        if (stopped) return;
+        window.setTimeout(connect, retry);
+        retry = Math.min(retry * 2, 30_000);
+      };
+    };
+    connect();
+    return () => { stopped = true; socket?.close(); };
+  }, []);
+  useEffect(() => {
     if (!detail) return;
     setDetails(null);
     fetch(`/api/tasks/${detail}/details`)
@@ -122,15 +139,39 @@ function App() {
         body.tasks!.some((task) => task.id === previous) ? previous : "",
       );
       setOffline(false);
+      return true;
     } catch (error) {
       setOffline(true);
       if (error instanceof Error && !tasks.length) setNotice(error.message);
+      return false;
     }
   };
   useEffect(() => {
-    void refreshTasks();
-    const timer = window.setInterval(() => void refreshTasks(), 2_000);
-    return () => window.clearInterval(timer);
+    let timer: number | undefined;
+    let stopped = false;
+    let delay = 2_000;
+    const schedule = () => {
+      if (stopped) return;
+      const interval = document.hidden ? 15_000 : 2_000;
+      timer = window.setTimeout(async () => {
+        const ok = await refreshTasks();
+        const base = document.hidden ? 15_000 : 2_000;
+        delay = ok ? base : Math.min(Math.max(delay * 2, base), 30_000);
+        schedule();
+      }, Math.max(interval, delay));
+    };
+    const refresh = () => {
+      delay = document.hidden ? 15_000 : 2_000;
+      void refreshTasks();
+    };
+    refresh();
+    document.addEventListener("visibilitychange", refresh);
+    schedule();
+    return () => {
+      stopped = true;
+      if (timer) window.clearTimeout(timer);
+      document.removeEventListener("visibilitychange", refresh);
+    };
   }, []);
   const visible = tasks
     .filter(
@@ -288,7 +329,6 @@ function App() {
           </span>
           <span>
             {product.shortName}
-            <span className="brand-sub">{product.subtitle}</span>
           </span>
         </a>
         <div className="workspace-label">
@@ -754,7 +794,7 @@ function App() {
                           {((details?.options.maxDownloadLimit ?? 0) / 1_000_000).toLocaleString(undefined, {
                             maximumFractionDigits: 2,
                           })}{" "}
-                          <span className="unit">Mb/s</span>
+                          <span className="unit">MB/s</span>
                         </strong>
                       </div>
                       <div>
@@ -942,13 +982,13 @@ function App() {
                   type="number"
                   min="0"
                   max="1000"
-                  step="0.01"
+                  step="1"
                   inputMode="decimal"
                   placeholder="0"
                   value={downloadLimit}
                   onChange={(e) => setDownloadLimit(e.target.value)}
                 />
-                <span className="unit">Mb/s</span>
+                <span className="unit">MB/s</span>
               </div>
             </label>
             <div className="modal-footer">
