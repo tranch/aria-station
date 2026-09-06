@@ -103,7 +103,7 @@
   "advancedOptionsUnavailable": "New downloads are queued. Speed limits and connection settings require an engine connection.",
   "settingsUnavailable": "Engine configuration will be available in a later phase.",
   "peers": "Peers",
-  "aria2Engine": "aria2 engine",
+  "aria2Engine": "Aria2 Engine",
   "connected": "Connected",
   "refreshConnection": "Refresh connection",
   "connectionDataMayBeStale": "Connection lost · Data may be stale",
