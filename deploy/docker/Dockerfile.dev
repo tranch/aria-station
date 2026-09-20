@@ -3,7 +3,7 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY apps/web/package.json apps/web/package.json
 RUN npm ci
-COPY apps/web apps/web
+COPY --chown=node:node apps/web apps/web
 EXPOSE 5173
 USER node
 CMD ["npm", "run", "dev", "--", "--host", "0.0.0.0"]

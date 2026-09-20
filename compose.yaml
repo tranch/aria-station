@@ -1,9 +1,59 @@
-# UI development preview only. Run the service and aria2 on the host for RPC tests.
 services:
   web:
     build:
       context: .
-      dockerfile: deploy/docker/Dockerfile.dev
+      dockerfile: deploy/docker/Dockerfile
+    image: aria-station:${APP_VERSION:-local}
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 55290
+      ARIA2_RPC_URL: http://aria2:6800/jsonrpc
+      ARIA2_RPC_SECRET: ${ARIA2_RPC_SECRET:?Set ARIA2_RPC_SECRET in .env}
+      AUTH_USER: ${AUTH_USER:?Set AUTH_USER in .env}
+      AUTH_PASSWORD: ${AUTH_PASSWORD:?Set AUTH_PASSWORD in .env}
     ports:
-      - "127.0.0.1:5173:5173"
+      - "${WEB_BIND_IP:-0.0.0.0}:${WEB_BIND_PORT:-55290}:55290"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
     init: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:55290/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - aria2
+
+  aria2:
+    build:
+      context: deploy/docker
+      dockerfile: Dockerfile.aria2
+    image: aria-station-aria2:${APP_VERSION:-local}
+    environment:
+      ARIA2_RPC_SECRET: ${ARIA2_RPC_SECRET:?Set ARIA2_RPC_SECRET in .env}
+    user: "${PUID:-568}:${PGID:-568}"
+    volumes:
+      - ${ARIA2_CONFIG_PATH:-./.data/aria2-config}:/config
+      - ${DOWNLOADS_PATH:-./.data/downloads}:/downloads
+    expose:
+      - "6800"
+    ports:
+      - "${BT_BIND_IP:-0.0.0.0}:${BT_PORT:-51413}:51413/tcp"
+      - "${BT_BIND_IP:-0.0.0.0}:${BT_PORT:-51413}:51413/udp"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    init: true
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true

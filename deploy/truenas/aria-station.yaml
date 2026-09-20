@@ -1,0 +1,55 @@
+services:
+  web:
+    image: ghcr.io/tranch/aria-station:0.1.0
+    init: true
+    restart: unless-stopped
+    user: "1000:1000"
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "55290"
+      ARIA2_RPC_URL: http://aria2:6800/jsonrpc
+      ARIA2_RPC_SECRET: REPLACE_WITH_THE_SAME_RANDOM_64_CHARACTER_HEX_SECRET
+      AUTH_USER: admin
+      AUTH_PASSWORD: REPLACE_WITH_A_UNIQUE_PASSWORD_OF_AT_LEAST_16_CHARACTERS
+    ports:
+      - "0.0.0.0:55290:55290"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=64m
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:55290/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      - aria2
+
+  aria2:
+    image: ghcr.io/tranch/aria-station-aria2:0.1.0
+    pull_policy: always
+    init: true
+    restart: unless-stopped
+    user: "568:568"
+    environment:
+      ARIA2_RPC_SECRET: REPLACE_WITH_THE_SAME_RANDOM_64_CHARACTER_HEX_SECRET
+    volumes:
+      - /mnt/POOL/apps/aria-station/aria2-config:/config
+      - /mnt/POOL/downloads:/downloads
+    expose:
+      - "6800"
+    ports:
+      - "0.0.0.0:51413:51413/tcp"
+      - "0.0.0.0:51413:51413/udp"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=32m
+    security_opt:
+      - no-new-privileges:true

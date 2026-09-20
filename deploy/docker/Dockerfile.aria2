@@ -1,0 +1,11 @@
+FROM alpine:3.22.1
+RUN apk add --no-cache aria2=1.37.0-r1 \
+  && addgroup -S -g 568 apps \
+  && adduser -S -D -H -u 568 -G apps apps
+COPY aria2-entrypoint.sh /usr/local/bin/aria2-entrypoint
+RUN chmod 0755 /usr/local/bin/aria2-entrypoint
+ENV HOME=/tmp
+WORKDIR /downloads
+USER 568:568
+EXPOSE 6800 51413/tcp 51413/udp
+ENTRYPOINT ["/usr/local/bin/aria2-entrypoint"]

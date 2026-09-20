@@ -1,5 +1,6 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +55,41 @@ const allowedFolders = new Set([
   "music",
   "documents",
 ]);
+
+const authUser = process.env.AUTH_USER;
+const authPassword = process.env.AUTH_PASSWORD;
+if (Boolean(authUser) !== Boolean(authPassword)) {
+  throw new Error("AUTH_USER and AUTH_PASSWORD must be configured together");
+}
+if (process.env.NODE_ENV === "production") {
+  if (!authUser || !authPassword)
+    throw new Error("AUTH_USER and AUTH_PASSWORD are required in production");
+  if (authPassword.length < 16)
+    throw new Error("AUTH_PASSWORD must contain at least 16 characters");
+  if (/^(REPLACE_WITH_|replace-with-)/.test(authPassword))
+    throw new Error(
+      "Replace the AUTH_PASSWORD template value before deployment",
+    );
+}
+
+const expectedCredentials =
+  authUser && authPassword
+    ? createHash("sha256").update(`${authUser}\0${authPassword}`).digest()
+    : undefined;
+
+function isAuthorized(authorization: string | undefined) {
+  if (!expectedCredentials) return true;
+  if (!authorization?.startsWith("Basic ")) return false;
+  const encoded = authorization.slice(6);
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
+  const decoded = Buffer.from(encoded, "base64").toString("utf8");
+  const separator = decoded.indexOf(":");
+  if (separator < 1 || decoded.includes("\0")) return false;
+  const suppliedCredentials = createHash("sha256")
+    .update(`${decoded.slice(0, separator)}\0${decoded.slice(separator + 1)}`)
+    .digest();
+  return timingSafeEqual(expectedCredentials, suppliedCredentials);
+}
 
 class HttpError extends Error {
   constructor(
@@ -157,6 +193,33 @@ function validUri(value: unknown): value is string {
 const app = Fastify({ logger: true });
 const events = new WebSocketServer({ noServer: true });
 
+app.addHook("onRequest", async (request, reply) => {
+  if (
+    request.url === "/api/ready" ||
+    isAuthorized(request.headers.authorization)
+  ) {
+    const origin = request.headers.origin;
+    if (
+      origin &&
+      ["POST", "PUT", "PATCH", "DELETE"].includes(request.method) &&
+      (() => {
+        try {
+          return new URL(origin).host !== request.headers.host;
+        } catch {
+          return true;
+        }
+      })()
+    )
+      return reply.code(403).send({ error: "Cross-origin request rejected" });
+    return;
+  }
+  reply.header(
+    "WWW-Authenticate",
+    'Basic realm="Aria Station", charset="UTF-8"',
+  );
+  return reply.code(401).send({ error: "Authentication required" });
+});
+
 events.on("connection", (client) => {
   const upstreamUrl = rpcUrl.replace(/^http/, "ws");
   const upstream = new WebSocket(upstreamUrl);
@@ -176,15 +239,20 @@ events.on("connection", (client) => {
 
 app.setErrorHandler((error, _request, reply) => {
   const statusCode = error instanceof HttpError ? error.statusCode : 500;
-  reply
-    .status(statusCode)
-    .send({ error: error.message || "Unexpected server error" });
+  reply.status(statusCode).send({
+    error:
+      error instanceof Error && error.message
+        ? error.message
+        : "Unexpected server error",
+  });
 });
 
 app.get("/api/health", async () => {
   const version = await rpc<{ version: string }>("getVersion");
   return { connected: true, version: version.version };
 });
+
+app.get("/api/ready", async () => ({ ready: true }));
 
 app.get("/api/tasks", async () => {
   const fields = [
@@ -232,7 +300,7 @@ app.get<{ Params: { gid: string } }>(
         path:
           status.dir && file.path.startsWith(`${status.dir}/`)
             ? file.path.slice(status.dir.length + 1)
-            : file.path.split("/").pop() ?? file.path,
+            : (file.path.split("/").pop() ?? file.path),
         totalBytes: number(file.length),
         completedBytes: number(file.completedLength),
         selected: file.selected === "true",
@@ -261,26 +329,42 @@ app.patch<{
       body.maxDownloadLimit < 0 ||
       body.maxDownloadLimit > 1_000_000_000
     )
-      throw new HttpError(400, "Download limit must be a whole number of bytes per second");
+      throw new HttpError(
+        400,
+        "Download limit must be a whole number of bytes per second",
+      );
     options["max-download-limit"] = String(body.maxDownloadLimit);
   }
   if (body.selectedFileIndexes !== undefined) {
     if (
       !Array.isArray(body.selectedFileIndexes) ||
-      !body.selectedFileIndexes.every((index) => Number.isInteger(index) && index > 0)
+      !body.selectedFileIndexes.every(
+        (index) => Number.isInteger(index) && index > 0,
+      )
     )
       throw new HttpError(400, "Selected file indexes are invalid");
     options["select-file"] = body.selectedFileIndexes.join(",");
   }
-  if (!Object.keys(options).length) throw new HttpError(400, "No task options provided");
+  if (!Object.keys(options).length)
+    throw new HttpError(400, "No task options provided");
   await rpc<string>("changeOption", [request.params.gid, options]);
   return { gid: request.params.gid, options };
 });
 
 app.post<{
-  Body: { uris?: unknown; folder?: unknown; torrentBase64?: unknown; maxDownloadLimit?: unknown };
+  Body: {
+    uris?: unknown;
+    folder?: unknown;
+    torrentBase64?: unknown;
+    maxDownloadLimit?: unknown;
+  };
 }>("/api/tasks", async (request, reply) => {
-  const { uris = [], folder, torrentBase64, maxDownloadLimit = 0 } = request.body ?? {};
+  const {
+    uris = [],
+    folder,
+    torrentBase64,
+    maxDownloadLimit = 0,
+  } = request.body ?? {};
   if (!Array.isArray(uris) || !uris.every(validUri))
     throw new HttpError(
       400,
@@ -299,7 +383,10 @@ app.post<{
     maxDownloadLimit < 0 ||
     maxDownloadLimit > 1_000_000_000
   )
-    throw new HttpError(400, "Download limit must be a whole number of bytes per second");
+    throw new HttpError(
+      400,
+      "Download limit must be a whole number of bytes per second",
+    );
   const options = {
     dir: downloadDirectory(folder),
     "max-download-limit": String(maxDownloadLimit),
@@ -341,6 +428,26 @@ app.server.on("upgrade", (request, socket, head) => {
   if (request.url !== "/api/events") {
     socket.destroy();
     return;
+  }
+  if (!isAuthorized(request.headers.authorization)) {
+    socket.write(
+      'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Aria Station", charset="UTF-8"\r\nConnection: close\r\n\r\n',
+    );
+    socket.destroy();
+    return;
+  }
+  if (request.headers.origin) {
+    try {
+      if (new URL(request.headers.origin).host !== request.headers.host) {
+        socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+    } catch {
+      socket.write("HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
   }
   events.handleUpgrade(request, socket, head, (client) =>
     events.emit("connection", client, request),

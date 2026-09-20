@@ -16,7 +16,7 @@ The current milestone provides a working React frontend and same-origin Node.js 
 - Selecting torrent files and setting a task download limit
 - Live refresh, connection diagnostics, and aria2 WebSocket notifications
 
-Authentication, persistent application history, production Docker images, and the full TrueNAS delivery workflow remain planned work.
+Authentication is configurable for single-admin deployments. Application task history is not yet stored independently; aria2's active and queued tasks persist in its session file.
 
 ## Project structure
 
@@ -25,11 +25,12 @@ Authentication, persistent application history, production Docker images, and th
 ├── apps/
 │   ├── web/                 React + TypeScript + Vite frontend
 │   └── server/              Fastify service and aria2 JSON-RPC adapter
-├── deploy/docker/           Development container configuration
+├── deploy/docker/           Production and development container images
+├── deploy/truenas/          TrueNAS Custom App YAML template
 ├── docs/                    Implementation plan and delivery notes
-├── compose.yaml             UI development preview
+├── compose.yaml             Production two-container stack
 ├── package.json             Workspace scripts and dependencies
-└── run-aria2.sh             Local aria2 helper script
+└── .github/workflows/       Multi-architecture image publishing
 ```
 
 The browser only talks to the web service. The service owns the aria2 RPC secret and exposes a controlled API to the frontend.
@@ -58,7 +59,9 @@ Create a local environment file before starting the service:
 cp .env.example .env
 ```
 
-Set `ARIA2_RPC_URL` and `ARIA2_RPC_SECRET` in `.env`. The secret must match the secret used by aria2. For a local aria2 instance, the included helper can be used:
+Set `ARIA2_RPC_URL` and `ARIA2_RPC_SECRET` in `.env`. The secret must match the secret used by aria2. A local aria2 instance can be started with the helper script:
+
+The example also enables HTTP Basic authentication locally: use the configured `AUTH_USER` and `AUTH_PASSWORD` when the browser prompts. Replace the example password before exposing the service beyond your own machine.
 
 ```bash
 ./run-aria2.sh
@@ -81,11 +84,30 @@ npm run typecheck
 npm run build
 ```
 
-## Docker and TrueNAS direction
+## Docker and TrueNAS
 
-The intended production layout separates the web service and aria2 into two containers. The web service is exposed to users, while aria2 RPC remains on a private container network. Users may also run Aria Station as a web service connected to an existing aria2 instance.
+The production stack runs Aria Station and aria2 in separate containers. Only the web interface and aria2's BitTorrent listening port are published; RPC stays on the private container network. Configure `AUTH_USER` and a unique `AUTH_PASSWORD` of at least 16 characters. The browser will prompt for these credentials. Basic authentication should be used over HTTPS or on a trusted, firewalled LAN.
 
-TrueNAS support targets SCALE 24.10+ Docker Apps using Custom App YAML. The release workflow still needs real-device validation for dataset permissions, UID/GID mapping, health checks, session recovery, backups, upgrades, and rollback. The current Compose file is a UI development preview and is not a production or TrueNAS deployment.
+For a Docker host, copy `.env.example` to `.env`, replace both placeholder secrets, set writable data paths, then run:
+
+```bash
+docker compose up -d --build
+```
+
+Generate secrets with `openssl rand -hex 32`; use a different value for the web password and aria2 RPC secret. Downloaded files are stored under `DOWNLOADS_PATH`, and aria2's resume session is stored under `ARIA2_CONFIG_PATH`. These paths must be writable by `PUID:PGID` (default `568:568`). The web process runs as the unprivileged `node` user.
+
+On a Linux host, create new empty bind-mount directories and grant the aria2 identity access before the first start:
+
+```bash
+mkdir -p .data/aria2-config .data/downloads
+sudo chown 568:568 .data/aria2-config .data/downloads
+```
+
+Do not apply that ownership change recursively to existing download data unless that is intended.
+
+TrueNAS SCALE 24.10+ can install [`deploy/truenas/aria-station.yaml`](deploy/truenas/aria-station.yaml) using Apps → Discover Apps → Install via YAML (Custom App). Replace the template dataset paths, set ACL access for UID/GID 568, and replace both secret placeholders. Versioned images are published to GHCR when a `v*` Git tag is pushed; the packages must be public or otherwise accessible to the NAS before installation. See [`deploy/truenas/README.md`](deploy/truenas/README.md) for setup, backup, and upgrade instructions.
+
+The app is not yet a catalog release. The `/api/ready` health check indicates that the web process is alive; the app's Settings page separately reports aria2 connectivity. Application history and automatic database backups are not implemented yet.
 
 ## License
 
