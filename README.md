@@ -105,7 +105,7 @@ sudo chown 568:568 .data/aria2-config .data/downloads
 
 Do not apply that ownership change recursively to existing download data unless that is intended.
 
-TrueNAS SCALE 24.10+ can install [`deploy/truenas/aria-station.yaml`](deploy/truenas/aria-station.yaml) using Apps → Discover Apps → Install via YAML (Custom App). Replace the template dataset paths, set ACL access for UID/GID 568, and replace both secret placeholders. Versioned images are published to GHCR when a `v*` Git tag is pushed; the packages must be public or otherwise accessible to the NAS before installation. See [`deploy/truenas/README.md`](deploy/truenas/README.md) for setup, backup, and upgrade instructions.
+TrueNAS SCALE 24.10+ can install [`deploy/truenas/aria-station.yaml`](deploy/truenas/aria-station.yaml) using Apps → Discover Apps → Install via YAML (Custom App). Replace the template dataset paths, set ACL access for UID/GID 568, and replace both secret placeholders. Versioned images are published to GHCR when a `v*` Git tag is pushed; the packages must be public or otherwise accessible to the NAS before installation. See [`deploy/truenas/README.md`](deploy/truenas/README.md) for local development, release, installation, upgrade, verification, and rollback instructions.
 
 The app is not yet a catalog release. The `/api/ready` health check indicates that the web process is alive; the app's Settings page separately reports aria2 connectivity. Application history and automatic database backups are not implemented yet.
 
