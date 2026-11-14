@@ -53,6 +53,8 @@
   "torrentUpTo10MB": ".torrent · Up to 10 MB",
   "downloadDirectory": "Download directory",
   "downloadLimit": "Task download limit",
+  "threadCount": "Threads per download",
+  "threadCountHelp": "Maximum number of connections aria2 uses for each download.",
   "save": "Save",
   "advancedOptions": "Advanced options",
   "noFilesWillBeDownloaded": "Downloads will be added to aria2.",

@@ -58,6 +58,7 @@ function App() {
     [height, setHeight] = useState(258),
     [details, setDetails] = useState<TaskDetails | null>(null),
     [downloadLimit, setDownloadLimit] = useState(""),
+    [threadCount, setThreadCount] = useState("5"),
     [health, setHealth] = useState<Health | null>(null);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -277,6 +278,7 @@ function App() {
             downloadLimit.trim() === ""
               ? 0
               : Math.round(Number(downloadLimit) * 1_000_000),
+          split: Number(threadCount),
         }),
       });
       const body = (await response.json()) as {
@@ -293,6 +295,7 @@ function App() {
       setInput("");
       setTorrent(null);
       setDownloadLimit("");
+      setThreadCount("5");
       notify(downloadsAdded(body.gids.length));
       await refreshTasks();
     } catch (error) {
@@ -990,6 +993,18 @@ function App() {
                 />
                 <span className="unit">MB/s</span>
               </div>
+            </label>
+            <label className="field">
+              {messages.threadCount}
+              <select
+                value={threadCount}
+                onChange={(e) => setThreadCount(e.target.value)}
+              >
+                {[1, 2, 4, 8, 16].map((count) => (
+                  <option key={count} value={count}>{count}</option>
+                ))}
+              </select>
+              <small>{messages.threadCountHelp}</small>
             </label>
             <div className="modal-footer">
               <span>{messages.noFilesWillBeDownloaded}</span>

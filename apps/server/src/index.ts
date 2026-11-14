@@ -357,6 +357,7 @@ app.post<{
     folder?: unknown;
     torrentBase64?: unknown;
     maxDownloadLimit?: unknown;
+    split?: unknown;
   };
 }>("/api/tasks", async (request, reply) => {
   const {
@@ -364,6 +365,7 @@ app.post<{
     folder,
     torrentBase64,
     maxDownloadLimit = 0,
+    split = 5,
   } = request.body ?? {};
   if (!Array.isArray(uris) || !uris.every(validUri))
     throw new HttpError(
@@ -387,9 +389,12 @@ app.post<{
       400,
       "Download limit must be a whole number of bytes per second",
     );
+  if (typeof split !== "number" || !Number.isInteger(split) || ![1, 2, 4, 8, 16].includes(split))
+    throw new HttpError(400, "Thread count must be one of 1, 2, 4, 8, or 16");
   const options = {
     dir: downloadDirectory(folder),
     "max-download-limit": String(maxDownloadLimit),
+    split: String(split),
   };
   const gids = await Promise.all(
     uris.map((uri) => rpc<string>("addUri", [[uri], options])),
