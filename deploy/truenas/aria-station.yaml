@@ -1,6 +1,6 @@
 services:
   web:
-    image: ghcr.io/tranch/aria-station:0.1.0
+    image: ghcr.io/tranch/aria-station:0.1.1
     init: true
     restart: unless-stopped
     user: "1000:1000"
@@ -33,7 +33,7 @@ services:
       - aria2
 
   aria2:
-    image: ghcr.io/tranch/aria-station-aria2:0.1.0
+    image: ghcr.io/tranch/aria-station-aria2:0.1.1
     pull_policy: always
     init: true
     restart: unless-stopped
