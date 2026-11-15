@@ -1,7 +1,10 @@
 import Fastify from "fastify";
 import fastifyStatic from "@fastify/static";
-import { createHash, timingSafeEqual } from "node:crypto";
-import { existsSync } from "node:fs";
+import fastifyCookie from "@fastify/cookie";
+import Database from "better-sqlite3";
+import argon2 from "argon2";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocket, WebSocketServer } from "ws";
@@ -56,40 +59,53 @@ const allowedFolders = new Set([
   "documents",
 ]);
 
-const authUser = process.env.AUTH_USER;
-const authPassword = process.env.AUTH_PASSWORD;
-if (Boolean(authUser) !== Boolean(authPassword)) {
-  throw new Error("AUTH_USER and AUTH_PASSWORD must be configured together");
-}
-if (process.env.NODE_ENV === "production") {
-  if (!authUser || !authPassword)
-    throw new Error("AUTH_USER and AUTH_PASSWORD are required in production");
-  if (authPassword.length < 16)
-    throw new Error("AUTH_PASSWORD must contain at least 16 characters");
-  if (/^(REPLACE_WITH_|replace-with-)/.test(authPassword))
-    throw new Error(
-      "Replace the AUTH_PASSWORD template value before deployment",
-    );
+const appDataDir = resolve(process.env.APP_DATA_DIR ?? "./.data/app");
+mkdirSync(appDataDir, { recursive: true, mode: 0o700 });
+const database = new Database(resolve(appDataDir, "aria-station.sqlite"));
+chmodSync(resolve(appDataDir, "aria-station.sqlite"), 0o600);
+database.pragma("journal_mode = WAL");
+database.pragma("foreign_keys = ON");
+database.exec(`
+  CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS sessions (
+    token_hash TEXT PRIMARY KEY, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS task_history (
+    gid TEXT PRIMARY KEY, task_json TEXT NOT NULL, observed_at INTEGER NOT NULL
+  );
+`);
+const setting = database.prepare("SELECT value FROM settings WHERE key = ?");
+const adminConfigured = () => Boolean(setting.get("admin_username"));
+const sessionDays = 30;
+const cookieName = "aria_station_session";
+const secureCookies =
+  process.env.COOKIE_SECURE === "true" ||
+  (process.env.COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production");
+
+function tokenHash(token: string) {
+  return createHash("sha256").update(token).digest("hex");
 }
 
-const expectedCredentials =
-  authUser && authPassword
-    ? createHash("sha256").update(`${authUser}\0${authPassword}`).digest()
-    : undefined;
-
-function isAuthorized(authorization: string | undefined) {
-  if (!expectedCredentials) return true;
-  if (!authorization?.startsWith("Basic ")) return false;
-  const encoded = authorization.slice(6);
-  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) return false;
-  const decoded = Buffer.from(encoded, "base64").toString("utf8");
-  const separator = decoded.indexOf(":");
-  if (separator < 1 || decoded.includes("\0")) return false;
-  const suppliedCredentials = createHash("sha256")
-    .update(`${decoded.slice(0, separator)}\0${decoded.slice(separator + 1)}`)
-    .digest();
-  return timingSafeEqual(expectedCredentials, suppliedCredentials);
+function sessionValid(token: string | undefined) {
+  if (!token || !adminConfigured()) return false;
+  const row = database
+    .prepare("SELECT expires_at FROM sessions WHERE token_hash = ?")
+    .get(tokenHash(token)) as { expires_at: number } | undefined;
+  if (!row) return false;
+  if (row.expires_at <= Date.now()) {
+    database.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash(token));
+    return false;
+  }
+  return true;
 }
+
+const saveHistory = database.prepare(`
+  INSERT INTO task_history (gid, task_json, observed_at) VALUES (?, ?, ?)
+  ON CONFLICT(gid) DO UPDATE SET task_json=excluded.task_json, observed_at=excluded.observed_at
+`);
+const loadHistory = () =>
+  (database.prepare("SELECT task_json FROM task_history ORDER BY observed_at DESC").all() as Array<{task_json:string}>)
+    .map((row) => JSON.parse(row.task_json) as ReturnType<typeof task>);
 
 class HttpError extends Error {
   constructor(
@@ -192,12 +208,11 @@ function validUri(value: unknown): value is string {
 
 const app = Fastify({ logger: true });
 const events = new WebSocketServer({ noServer: true });
+await app.register(fastifyCookie);
 
 app.addHook("onRequest", async (request, reply) => {
-  if (
-    request.url === "/api/ready" ||
-    isAuthorized(request.headers.authorization)
-  ) {
+  const publicPath = ["/api/ready", "/api/auth/status", "/api/auth/setup", "/api/auth/login"].includes(request.url.split("?")[0]);
+  if (publicPath || sessionValid(request.cookies[cookieName])) {
     const origin = request.headers.origin;
     if (
       origin &&
@@ -213,10 +228,6 @@ app.addHook("onRequest", async (request, reply) => {
       return reply.code(403).send({ error: "Cross-origin request rejected" });
     return;
   }
-  reply.header(
-    "WWW-Authenticate",
-    'Basic realm="Aria Station", charset="UTF-8"',
-  );
   return reply.code(401).send({ error: "Authentication required" });
 });
 
@@ -254,6 +265,60 @@ app.get("/api/health", async () => {
 
 app.get("/api/ready", async () => ({ ready: true }));
 
+app.get("/api/auth/status", async () => ({ setupRequired: !adminConfigured() }));
+
+const loginFailures = new Map<string, { count: number; blockedUntil: number }>();
+app.post<{ Body: { username?: unknown; password?: unknown } }>("/api/auth/setup", async (request, reply) => {
+  if (adminConfigured()) throw new HttpError(409, "Administrator is already configured");
+  const { username, password } = request.body ?? {};
+  if (typeof username !== "string" || !/^[\p{L}\p{N}_.@-]{3,64}$/u.test(username))
+    throw new HttpError(400, "Username must be 3–64 letters, numbers, or . _ @ -");
+  if (typeof password !== "string" || password.length < 12 || password.length > 256)
+    throw new HttpError(400, "Password must contain 12–256 characters");
+  const hash = await argon2.hash(password, { type: argon2.argon2id });
+  const insert = database.prepare("INSERT INTO settings(key,value) VALUES (?,?)");
+  const transaction = database.transaction(() => {
+    insert.run("admin_username", username);
+    insert.run("admin_password_hash", hash);
+  });
+  try { transaction(); } catch { throw new HttpError(409, "Administrator is already configured"); }
+  return reply.code(201).send({ configured: true });
+});
+
+app.post<{ Body: { username?: unknown; password?: unknown } }>("/api/auth/login", async (request, reply) => {
+  if (!adminConfigured()) throw new HttpError(409, "Complete administrator setup first");
+  const key = request.ip;
+  const failure = loginFailures.get(key);
+  if (failure && failure.blockedUntil > Date.now()) throw new HttpError(429, "Too many login attempts; try again later");
+  const { username, password } = request.body ?? {};
+  const expectedUser = setting.get("admin_username") as { value: string };
+  const passwordHash = setting.get("admin_password_hash") as { value: string };
+  const valid = typeof username === "string" && typeof password === "string" &&
+    timingSafeEqual(createHash("sha256").update(username).digest(), createHash("sha256").update(expectedUser.value).digest()) &&
+    await argon2.verify(passwordHash.value, password).catch(() => false);
+  if (!valid) {
+    const count = (failure?.count ?? 0) + 1;
+    loginFailures.set(key, { count, blockedUntil: count >= 5 ? Date.now() + 60_000 : 0 });
+    throw new HttpError(401, "Invalid username or password");
+  }
+  loginFailures.delete(key);
+  const token = randomBytes(32).toString("base64url");
+  const now = Date.now();
+  database.prepare("INSERT INTO sessions(token_hash,created_at,expires_at) VALUES (?,?,?)")
+    .run(tokenHash(token), now, now + sessionDays * 24 * 60 * 60 * 1000);
+  reply.setCookie(cookieName, token, { path: "/", httpOnly: true, sameSite: "strict", secure: secureCookies, maxAge: sessionDays * 24 * 60 * 60 });
+  return { authenticated: true, username: expectedUser.value };
+});
+
+app.post("/api/auth/logout", async (request, reply) => {
+  const token = request.cookies[cookieName];
+  if (token) database.prepare("DELETE FROM sessions WHERE token_hash = ?").run(tokenHash(token));
+  reply.clearCookie(cookieName, { path: "/", httpOnly: true, sameSite: "strict", secure: secureCookies });
+  return { authenticated: false };
+});
+
+app.get("/api/auth/me", async () => ({ username: (setting.get("admin_username") as {value:string}).value }));
+
 app.get("/api/tasks", async () => {
   const fields = [
     "gid",
@@ -276,7 +341,15 @@ app.get("/api/tasks", async () => {
     rpc<AriaStatus[]>("tellWaiting", [0, 1_000, fields]),
     rpc<AriaStatus[]>("tellStopped", [0, 1_000, fields]),
   ]);
-  return { tasks: [...active, ...waiting, ...stopped].map(task) };
+  const current = [...active, ...waiting, ...stopped].map(task);
+  const observedAt = Date.now();
+  const upsertMany = database.transaction((items: ReturnType<typeof task>[]) => {
+    for (const item of items) saveHistory.run(item.id, JSON.stringify(item), observedAt);
+  });
+  upsertMany(current);
+  const currentIds = new Set(current.map((item) => item.id));
+  const history = loadHistory().filter((item) => !currentIds.has(item.id));
+  return { tasks: [...current, ...history] };
 });
 
 app.get<{ Params: { gid: string } }>(
@@ -434,10 +507,12 @@ app.server.on("upgrade", (request, socket, head) => {
     socket.destroy();
     return;
   }
-  if (!isAuthorized(request.headers.authorization)) {
-    socket.write(
-      'HTTP/1.1 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Aria Station", charset="UTF-8"\r\nConnection: close\r\n\r\n',
-    );
+  const cookies = Object.fromEntries((request.headers.cookie ?? "").split(";").map((part) => {
+    const [name, ...rest] = part.trim().split("=");
+    return [name, decodeURIComponent(rest.join("="))];
+  }));
+  if (!sessionValid(cookies[cookieName])) {
+    socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
     socket.destroy();
     return;
   }
@@ -467,6 +542,23 @@ if (existsSync(webDist)) {
   await app.register(fastifyStatic, { root: webDist, wildcard: false });
   app.get("/*", (_request, reply) => reply.sendFile("index.html"));
 }
+
+const saveAriaSession = async () => {
+  try { await rpc<string>("saveSession"); }
+  catch (error) { app.log.warn({ err: error }, "Unable to request aria2 session save during shutdown"); }
+};
+let shuttingDown = false;
+const shutdown = async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await saveAriaSession();
+  database.pragma("wal_checkpoint(TRUNCATE)");
+  database.close();
+  await app.close();
+  process.exit(0);
+};
+process.once("SIGTERM", () => void shutdown());
+process.once("SIGINT", () => void shutdown());
 
 await app.listen({
   host: process.env.HOST ?? "127.0.0.1",

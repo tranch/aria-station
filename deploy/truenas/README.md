@@ -20,12 +20,13 @@ For local development, use `compose.yaml` and the repository's development scrip
 
 Create two datasets in the TrueNAS UI before installation:
 
+- An application data dataset mounted at `/mnt/<pool>/apps/aria-station/app-data` (writable by Web UID/GID 1000; stores SQLite history and login sessions)
 - An aria2 config dataset mounted at `/mnt/<pool>/apps/aria-station/aria2-config`
 - A download dataset mounted at `/mnt/<pool>/downloads` (or another chosen download location)
 
-Set both dataset ACLs to allow read/write access for UID 568 and GID 568 (`apps`). Do not recursively change permissions on a dataset containing existing files unless intended. Aria2 exits with a diagnostic if it cannot write either mount.
+Set the application data dataset ACL to allow read/write access for UID/GID 1000 (`apps` Web service). Set the aria2 config and downloads dataset ACLs to allow read/write access for UID 568 and GID 568 (`apps`). Do not recursively change permissions on a dataset containing existing files unless intended. Aria2 exits with a diagnostic if it cannot write either mount.
 
-Generate an RPC secret with `openssl rand -hex 32`. Set the same value for the Web and aria2 services. Set a separate Web password of at least 16 characters. Keep completed deployment YAML in a secure administrator-managed location; never commit credentials to this repository.
+Generate an RPC secret with `openssl rand -hex 32`. Set the same value for the Web and aria2 services. Create the Web administrator account during first launch. Keep completed deployment YAML in a secure administrator-managed location; never commit RPC credentials to this repository.
 
 ## First installation
 
@@ -37,9 +38,9 @@ Generate an RPC secret with `openssl rand -hex 32`. Set the same value for the W
 6. Open `http://<nas-address>:55290/` (or the configured port), log in, and confirm Settings reports aria2 connected.
 7. Add a small test download, confirm the file appears in the selected dataset, then remove the test task and clean up its file if appropriate.
 
-The Web container runs as UID/GID 1000 with a read-only root filesystem. The aria2 container runs as UID/GID 568, stores its session under `/config`, and writes downloads under `/downloads`. Only the Web port and BitTorrent TCP/UDP port 51413 are published by the template. Router and firewall forwarding are separate network configuration.
+The Web container runs as UID/GID 1000 with a read-only root filesystem and stores its SQLite database in the app-data dataset mounted at `/data`. The aria2 container runs as UID/GID 568, stores its session under `/config`, and writes downloads under `/downloads`. Only the Web port and BitTorrent TCP/UDP port 51413 are published by the template. Router and firewall forwarding are separate network configuration.
 
-HTTP Basic credentials are not encrypted over plain HTTP. Use HTTPS through a trusted reverse proxy or restrict access to a trusted LAN/VPN. The app does not provide user accounts, password reset, or per-user permissions.
+Create the single administrator account on first launch. Passwords use Argon2id hashes and sessions use HttpOnly cookies. Serve the app over HTTPS; `COOKIE_SECURE=true` is enabled in the template. Account recovery and per-user permissions are not provided.
 
 ## Upgrade an installed app
 
@@ -62,4 +63,4 @@ The `/api/ready` health check confirms Web process readiness only. Confirm engin
 3. Restore dataset snapshots only when the failure requires reverting persisted configuration or download state. Restore the aria2 config and download datasets together when returning to a consistent recovery point; changing image tags alone does not restore bind-mounted data.
 4. Retain the failed version's logs and image tags until the cause is understood.
 
-There is no separate application-history database or database migration process yet. Update this procedure before introducing persistent application data or schema migrations.
+The application SQLite database lives in the `app-data` dataset mounted at `/data`. Include it in backups along with the aria2 config/session dataset. The database uses SQLite WAL mode; stop the web app or use SQLite's backup API for a consistent backup. Preserve this dataset during upgrades.

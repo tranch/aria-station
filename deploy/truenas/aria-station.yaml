@@ -1,6 +1,6 @@
 services:
   web:
-    image: ghcr.io/tranch/aria-station:0.1.1
+    image: ghcr.io/tranch/aria-station:0.1.2
     init: true
     restart: unless-stopped
     user: "1000:1000"
@@ -10,11 +10,13 @@ services:
       PORT: "55290"
       ARIA2_RPC_URL: http://aria2:6800/jsonrpc
       ARIA2_RPC_SECRET: REPLACE_WITH_THE_SAME_RANDOM_64_CHARACTER_HEX_SECRET
-      AUTH_USER: admin
-      AUTH_PASSWORD: REPLACE_WITH_A_UNIQUE_PASSWORD_OF_AT_LEAST_16_CHARACTERS
+      APP_DATA_DIR: /data
+      COOKIE_SECURE: "true"
     ports:
       - "0.0.0.0:55290:55290"
     read_only: true
+    volumes:
+      - /mnt/POOL/apps/aria-station/app-data:/data
     tmpfs:
       - /tmp:rw,noexec,nosuid,size=64m
     security_opt:
@@ -33,7 +35,7 @@ services:
       - aria2
 
   aria2:
-    image: ghcr.io/tranch/aria-station-aria2:0.1.1
+    image: ghcr.io/tranch/aria-station-aria2:0.1.2
     pull_policy: always
     init: true
     restart: unless-stopped

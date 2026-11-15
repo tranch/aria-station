@@ -59,10 +59,20 @@ function App() {
     [details, setDetails] = useState<TaskDetails | null>(null),
     [downloadLimit, setDownloadLimit] = useState(""),
     [threadCount, setThreadCount] = useState("5"),
-    [health, setHealth] = useState<Health | null>(null);
+    [health, setHealth] = useState<Health | null>(null),
+    [authMode, setAuthMode] = useState<"loading" | "setup" | "login" | "ready">("loading"),
+    [authUser, setAuthUser] = useState(""),
+    [authPassword, setAuthPassword] = useState("");
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     document.title = product.documentTitle;
+    fetch("/api/auth/status").then((response) => response.json()).then((body: { setupRequired: boolean }) => {
+      if (body.setupRequired) { setAuthMode("setup"); return undefined; }
+      return fetch("/api/auth/me");
+    }).then((response) => {
+      if (response?.ok) setAuthMode("ready");
+      else if (response) setAuthMode("login");
+    }).catch(() => setAuthMode("login"));
   }, []);
   useEffect(() => {
     let socket: WebSocket | undefined;
@@ -181,6 +191,16 @@ function App() {
         t.name.toLowerCase().includes(query.toLowerCase()),
     )
     .sort((a, b) => (sort ? a.name.localeCompare(b.name) : 0));
+  if (authMode !== "ready") return <main className="auth-screen">
+    <form className="auth-card" onSubmit={authenticate}>
+      <h1>{authMode === "setup" ? "Set up Aria Station" : "Sign in to Aria Station"}</h1>
+      <p>{authMode === "setup" ? "Create the local administrator account." : "Your administrator account is required."}</p>
+      <label>Username<input autoComplete="username" required minLength={3} maxLength={64} value={authUser} onChange={(event) => setAuthUser(event.target.value)} /></label>
+      <label>Password<input type="password" autoComplete={authMode === "setup" ? "new-password" : "current-password"} required minLength={authMode === "setup" ? 12 : 1} value={authPassword} onChange={(event) => setAuthPassword(event.target.value)} /></label>
+      <button className="primary" type="submit">{authMode === "setup" ? "Create administrator" : "Sign in"}</button>
+      {notice && <div role="alert" className="auth-error">{notice}</div>}
+    </form>
+  </main>;
   const current = tasks.find((t) => t.id === detail),
     picked = tasks.filter((t) => selected.includes(t.id));
   const download = tasks.reduce(
@@ -189,6 +209,18 @@ function App() {
     ),
     upload = tasks.reduce((n, t) => n + t.upload, 0);
   const notify = (s: string) => setNotice(s);
+  async function authenticate(event: React.FormEvent) {
+    event.preventDefault();
+    const endpoint = authMode === "setup" ? "/api/auth/setup" : "/api/auth/login";
+    try {
+      const response = await fetch(endpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ username: authUser, password: authPassword }) });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? "Authentication failed");
+      setAuthPassword("");
+      if (authMode === "setup") { setAuthMode("login"); notify("Administrator created. Sign in to continue."); }
+      else { setAuthMode("ready"); await refreshTasks(); }
+    } catch (error) { notify(error instanceof Error ? error.message : "Authentication failed"); }
+  }
   const saveOptions = async (body: Record<string, unknown>) => {
     if (!detail) return;
     const response = await fetch(`/api/tasks/${detail}/options`, {

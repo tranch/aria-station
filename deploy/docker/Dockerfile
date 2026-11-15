@@ -17,6 +17,8 @@ COPY --from=build --chown=root:root /app/apps/server/package.json ./apps/server/
 COPY --from=build --chown=root:root /app/apps/server/dist ./apps/server/dist
 COPY --from=build --chown=root:root /app/apps/web/package.json ./apps/web/package.json
 COPY --from=build --chown=root:root /app/apps/web/dist ./apps/web/dist
+RUN mkdir -p /data && chown node:node /data
+VOLUME ["/data"]
 USER node
 EXPOSE 55290
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
