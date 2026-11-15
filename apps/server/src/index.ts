@@ -326,6 +326,32 @@ app.post("/api/auth/logout", async (request, reply) => {
 
 app.get("/api/auth/me", async () => ({ username: (setting.get("admin_username") as {value:string}).value }));
 
+app.post<{
+  Body: { currentPassword?: unknown; newPassword?: unknown };
+}>("/api/auth/password", async (request) => {
+  const { currentPassword, newPassword } = request.body ?? {};
+  if (typeof currentPassword !== "string" || currentPassword.length < 1 || currentPassword.length > 256)
+    throw new HttpError(400, "Enter your current password");
+  if (typeof newPassword !== "string" || newPassword.length < 12 || newPassword.length > 256)
+    throw new HttpError(400, "New password must contain 12–256 characters");
+  const passwordHash = setting.get("admin_password_hash") as { value: string };
+  if (!(await argon2.verify(passwordHash.value, currentPassword).catch(() => false)))
+    throw new HttpError(401, "Current password is incorrect");
+  if (await argon2.verify(passwordHash.value, newPassword).catch(() => false))
+    throw new HttpError(400, "Choose a password different from your current one");
+
+  const token = request.cookies[cookieName];
+  if (!token) throw new HttpError(401, "Authentication required");
+  const newHash = await argon2.hash(newPassword, { type: argon2.argon2id });
+  const updatePassword = database.transaction(() => {
+    database.prepare("UPDATE settings SET value = ? WHERE key = 'admin_password_hash'").run(newHash);
+    // Keep this browser signed in and revoke any other existing sessions.
+    database.prepare("DELETE FROM sessions WHERE token_hash != ?").run(tokenHash(token));
+  });
+  updatePassword();
+  return { changed: true };
+});
+
 app.get("/api/tasks", async () => {
   const fields = [
     "gid",

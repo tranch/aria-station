@@ -120,5 +120,17 @@
   "engineDiagnostics": "Engine diagnostics",
   "engineConnected": "Connected to",
   "checkingEngine": "Checking aria2 connection…",
-  "settingsComingSoon": "Authentication, history and download settings will be added in a later phase."
+  "settingsComingSoon": "Authentication, history and download settings will be added in a later phase.",
+  "accountAndConnection": "Manage your administrator account and engine connection.",
+  "signedInAs": "Signed in as",
+  "currentPassword": "Current password",
+  "newPassword": "New password",
+  "confirmNewPassword": "Confirm new password",
+  "passwordSessionNote": "Use at least 12 characters. Other active sessions will be signed out after the change.",
+  "changePassword": "Change password",
+  "signOut": "Sign out",
+  "passwordsDoNotMatch": "The new passwords do not match.",
+  "passwordChanged": "Password changed. Other sessions have been signed out.",
+  "passwordChangeFailed": "Unable to change password.",
+  "logoutFailed": "Unable to sign out."
 }

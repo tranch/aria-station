@@ -62,16 +62,23 @@ function App() {
     [health, setHealth] = useState<Health | null>(null),
     [authMode, setAuthMode] = useState<"loading" | "setup" | "login" | "ready">("loading"),
     [authUser, setAuthUser] = useState(""),
-    [authPassword, setAuthPassword] = useState("");
+    [authPassword, setAuthPassword] = useState(""),
+    [currentPassword, setCurrentPassword] = useState(""),
+    [newPassword, setNewPassword] = useState(""),
+    [confirmPassword, setConfirmPassword] = useState(""),
+    [accountBusy, setAccountBusy] = useState(false);
   const dialog = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     document.title = product.documentTitle;
     fetch("/api/auth/status").then((response) => response.json()).then((body: { setupRequired: boolean }) => {
       if (body.setupRequired) { setAuthMode("setup"); return undefined; }
       return fetch("/api/auth/me");
-    }).then((response) => {
-      if (response?.ok) setAuthMode("ready");
-      else if (response) setAuthMode("login");
+    }).then(async (response) => {
+      if (response?.ok) {
+        const body = (await response.json()) as { username?: string };
+        if (body.username) setAuthUser(body.username);
+        setAuthMode("ready");
+      } else if (response) setAuthMode("login");
     }).catch(() => setAuthMode("login"));
   }, []);
   useEffect(() => {
@@ -127,7 +134,12 @@ function App() {
   }, [modal]);
   useEffect(() => {
     if (modal) dialog.current?.showModal();
-    else dialog.current?.close();
+    else {
+      dialog.current?.close();
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+    }
   }, [modal]);
   useEffect(() => {
     if (!notice) return;
@@ -158,6 +170,7 @@ function App() {
       return false;
     }
   };
+  const notify = (s: string) => setNotice(s);
   useEffect(() => {
     if (authMode !== "ready") return;
     let timer: number | undefined;
@@ -210,7 +223,6 @@ function App() {
       0,
     ),
     upload = tasks.reduce((n, t) => n + t.upload, 0);
-  const notify = (s: string) => setNotice(s);
   async function authenticate(event: React.FormEvent) {
     event.preventDefault();
     const endpoint = authMode === "setup" ? "/api/auth/setup" : "/api/auth/login";
@@ -222,6 +234,48 @@ function App() {
       if (authMode === "setup") { setAuthMode("login"); notify("Administrator created. Sign in to continue."); }
       else { setAuthMode("ready"); await refreshTasks(); }
     } catch (error) { notify(error instanceof Error ? error.message : "Authentication failed"); }
+  }
+  async function changePassword(event: React.FormEvent) {
+    event.preventDefault();
+    if (newPassword !== confirmPassword) {
+      notify(messages.passwordsDoNotMatch);
+      return;
+    }
+    setAccountBusy(true);
+    try {
+      const response = await fetch("/api/auth/password", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      const result = (await response.json()) as { error?: string };
+      if (!response.ok) throw new Error(result.error ?? messages.passwordChangeFailed);
+      setCurrentPassword("");
+      setNewPassword("");
+      setConfirmPassword("");
+      notify(messages.passwordChanged);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : messages.passwordChangeFailed);
+    } finally {
+      setAccountBusy(false);
+    }
+  }
+  async function logout() {
+    setAccountBusy(true);
+    try {
+      const response = await fetch("/api/auth/logout", { method: "POST" });
+      if (!response.ok) throw new Error(messages.logoutFailed);
+      setModal(null);
+      setTasks([]);
+      setSelected([]);
+      setDetail("");
+      setAuthPassword("");
+      setAuthMode("login");
+    } catch (error) {
+      notify(error instanceof Error ? error.message : messages.logoutFailed);
+    } finally {
+      setAccountBusy(false);
+    }
   }
   const saveOptions = async (body: Record<string, unknown>) => {
     if (!detail) return;
@@ -945,7 +999,9 @@ function App() {
             <p>
               {modal === "add"
                 ? messages.addURLsOrATorrentFile
-                : messages.engineDiagnostics}
+                : modal === "settings"
+                  ? messages.accountAndConnection
+                  : messages.engineDiagnostics}
             </p>
           </div>
           <button
@@ -1092,21 +1148,50 @@ function App() {
           </>
         ) : (
           <div className="settings">
-            <p>
-              {health
-                ? `${messages.engineConnected} aria2 ${health.version}`
-                : messages.checkingEngine}
-            </p>
-            <button
-              onClick={() => {
-                void refreshTasks();
-                setModal(null);
-              }}
-            >
-              <Icon name="refresh" />
-              {messages.refreshConnection}
-            </button>
-            <p className="hint">{messages.settingsComingSoon}</p>
+            <section className="settings-section">
+              <h3>{messages.account}</h3>
+              <p className="settings-account">{messages.signedInAs}: <strong>{authUser}</strong></p>
+              <form className="password-form" onSubmit={changePassword}>
+                <label>
+                  {messages.currentPassword}
+                  <input type="password" autoComplete="current-password" required maxLength={256} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+                </label>
+                <label>
+                  {messages.newPassword}
+                  <input type="password" autoComplete="new-password" required minLength={12} maxLength={256} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} />
+                </label>
+                <label>
+                  {messages.confirmNewPassword}
+                  <input type="password" autoComplete="new-password" required minLength={12} maxLength={256} value={confirmPassword} onChange={(event) => setConfirmPassword(event.target.value)} />
+                </label>
+                <small>{messages.passwordSessionNote}</small>
+                <button className="primary" type="submit" disabled={accountBusy}>
+                  <Icon name="key" />
+                  {messages.changePassword}
+                </button>
+              </form>
+              <button className="logout-button" onClick={() => void logout()} disabled={accountBusy}>
+                <Icon name="log-out" />
+                {messages.signOut}
+              </button>
+            </section>
+            <section className="settings-section">
+              <h3>{messages.aria2Engine}</h3>
+              <p>
+                {health
+                  ? `${messages.engineConnected} aria2 ${health.version}`
+                  : messages.checkingEngine}
+              </p>
+              <button
+                onClick={() => {
+                  void refreshTasks();
+                  setModal(null);
+                }}
+              >
+                <Icon name="refresh" />
+                {messages.refreshConnection}
+              </button>
+            </section>
           </div>
         )}
       </dialog>
