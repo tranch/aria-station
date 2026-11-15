@@ -211,8 +211,10 @@ const events = new WebSocketServer({ noServer: true });
 await app.register(fastifyCookie);
 
 app.addHook("onRequest", async (request, reply) => {
-  const publicPath = ["/api/ready", "/api/auth/status", "/api/auth/setup", "/api/auth/login"].includes(request.url.split("?")[0]);
-  if (publicPath || sessionValid(request.cookies[cookieName])) {
+  const path = request.url.split("?")[0];
+  const publicApiPath = ["/api/ready", "/api/auth/status", "/api/auth/setup", "/api/auth/login"].includes(path);
+  const hasSession = sessionValid(request.cookies[cookieName]);
+  if (publicApiPath || hasSession) {
     const origin = request.headers.origin;
     if (
       origin &&
@@ -226,6 +228,11 @@ app.addHook("onRequest", async (request, reply) => {
       })()
     )
       return reply.code(403).send({ error: "Cross-origin request rejected" });
+    return;
+  }
+  if (request.method === "GET" && !path.startsWith("/api/")) {
+    if (path !== "/login" && (path === "/" || request.headers.accept?.includes("text/html")))
+      return reply.redirect("/login", 302);
     return;
   }
   return reply.code(401).send({ error: "Authentication required" });
