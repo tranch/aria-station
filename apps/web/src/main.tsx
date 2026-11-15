@@ -75,6 +75,7 @@ function App() {
     }).catch(() => setAuthMode("login"));
   }, []);
   useEffect(() => {
+    if (authMode !== "ready") return;
     let socket: WebSocket | undefined;
     let retry = 1_000;
     let stopped = false;
@@ -90,9 +91,9 @@ function App() {
     };
     connect();
     return () => { stopped = true; socket?.close(); };
-  }, []);
+  }, [authMode]);
   useEffect(() => {
-    if (!detail) return;
+    if (authMode !== "ready" || !detail) return;
     setDetails(null);
     fetch(`/api/tasks/${detail}/details`)
       .then(async (response) => {
@@ -110,7 +111,7 @@ function App() {
             : "Unable to load task details",
         ),
       );
-  }, [detail, tab]);
+  }, [authMode, detail, tab]);
   useEffect(() => {
     if (modal !== "settings") return;
     setHealth(null);
@@ -158,6 +159,7 @@ function App() {
     }
   };
   useEffect(() => {
+    if (authMode !== "ready") return;
     let timer: number | undefined;
     let stopped = false;
     let delay = 2_000;
@@ -183,7 +185,7 @@ function App() {
       if (timer) window.clearTimeout(timer);
       document.removeEventListener("visibilitychange", refresh);
     };
-  }, []);
+  }, [authMode]);
   const visible = tasks
     .filter(
       (t) =>
