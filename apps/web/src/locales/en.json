@@ -116,7 +116,6 @@
   "noPeers": "No peers are currently connected.",
   "unknownClient": "Unknown client",
   "seeder": "Seeder",
-  "version": "v0.1.0",
   "engineDiagnostics": "Engine diagnostics",
   "engineConnected": "Connected to",
   "checkingEngine": "Checking aria2 connection…",

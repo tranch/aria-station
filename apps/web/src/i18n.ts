@@ -1,7 +1,8 @@
 import en from "./locales/en.json";
+declare const __APP_VERSION__: string;
 // English-only catalog boundary. Replace this module with the chosen i18n runtime
 // when additional locales are introduced; do not concatenate translated sentences.
-export const messages = en;
+export const messages = { ...en, version: `v${__APP_VERSION__}` };
 export const detailTabs = {
   overview: en.overview,
   files: en.files,
