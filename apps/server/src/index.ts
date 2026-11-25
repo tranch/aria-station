@@ -73,11 +73,16 @@ database.exec(`
   CREATE TABLE IF NOT EXISTS task_history (
     gid TEXT PRIMARY KEY, task_json TEXT NOT NULL, observed_at INTEGER NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS task_metadata (
+    gid TEXT PRIMARY KEY, tags_json TEXT NOT NULL, source TEXT NOT NULL,
+    download_path TEXT, updated_at INTEGER NOT NULL
+  );
 `);
 const setting = database.prepare("SELECT value FROM settings WHERE key = ?");
 const adminConfigured = () => Boolean(setting.get("admin_username"));
 const sessionDays = 30;
 const cookieName = "aria_station_session";
+const integrationToken = process.env.ARIA_STATION_INTEGRATION_TOKEN;
 const secureCookies =
   process.env.COOKIE_SECURE === "true" ||
   (process.env.COOKIE_SECURE !== "false" && process.env.NODE_ENV === "production");
@@ -212,6 +217,12 @@ await app.register(fastifyCookie);
 
 app.addHook("onRequest", async (request, reply) => {
   const path = request.url.split("?")[0];
+  if (path.startsWith("/api/integrations/v1/")) {
+    const authorization = request.headers.authorization;
+    if (!integrationToken || authorization !== `Bearer ${integrationToken}`)
+      return reply.code(401).send({ error: "Integration authentication required" });
+    return;
+  }
   const publicApiPath = ["/api/ready", "/api/auth/status", "/api/auth/setup", "/api/auth/login"].includes(path);
   const hasSession = sessionValid(request.cookies[cookieName]);
   if (publicApiPath || hasSession) {
@@ -271,6 +282,50 @@ app.get("/api/health", async () => {
 });
 
 app.get("/api/ready", async () => ({ ready: true }));
+
+function metadataFor(gid: string) {
+  const row = database.prepare("SELECT tags_json, source, download_path, updated_at FROM task_metadata WHERE gid = ?")
+    .get(gid) as { tags_json: string; source: string; download_path: string | null; updated_at: number } | undefined;
+  return row ? { tags: JSON.parse(row.tags_json) as string[], source: row.source, downloadPath: row.download_path, updatedAt: row.updated_at } : null;
+}
+
+app.get<{ Querystring: { tag?: string; source?: string } }>("/api/integrations/v1/tasks", async (request) => {
+  const { tag, source } = request.query;
+  const rows = database.prepare(`
+    SELECT gid, tags_json, source, download_path, updated_at FROM task_metadata
+    WHERE (? IS NULL OR source = ?)
+    ORDER BY updated_at DESC LIMIT 1000
+  `).all(source ?? null, source ?? null) as Array<{ gid: string; tags_json: string; source: string; download_path: string | null; updated_at: number }>;
+  return { tasks: rows.filter(row => !tag || (JSON.parse(row.tags_json) as string[]).includes(tag))
+    .map(row => ({ gid: row.gid, tags: JSON.parse(row.tags_json) as string[], source: row.source, downloadPath: row.download_path, updatedAt: row.updated_at })) };
+});
+
+app.get<{ Params: { gid: string } }>("/api/integrations/v1/tasks/:gid", async (request) => {
+  const metadata = metadataFor(request.params.gid);
+  return metadata ? { gid: request.params.gid, ...metadata } : { gid: request.params.gid, tags: [], source: null, downloadPath: null, updatedAt: null };
+});
+
+app.put<{ Params: { gid: string }; Body: { tags?: unknown; source?: unknown; downloadPath?: unknown } }>("/api/integrations/v1/tasks/:gid", async (request) => {
+  const { gid } = request.params;
+  const { tags, source = "external", downloadPath } = request.body ?? {};
+  if (!/^[a-fA-F0-9]{8,32}$/.test(gid)) throw new HttpError(400, "gid must be an aria2 task identifier");
+  if (!Array.isArray(tags) || tags.length > 64 || !tags.every(tag => typeof tag === "string" && tag.trim().length > 0 && tag.length <= 128))
+    throw new HttpError(400, "tags must be an array of up to 64 non-empty strings (128 characters each)");
+  if (typeof source !== "string" || !/^[a-zA-Z0-9_.-]{1,64}$/.test(source)) throw new HttpError(400, "source is invalid");
+  if (downloadPath !== undefined && (typeof downloadPath !== "string" || downloadPath.length > 4096 || !downloadPath.startsWith("/")))
+    throw new HttpError(400, "downloadPath must be an absolute aria2-visible path");
+  const uniqueTags = [...new Set(tags.map(tag => tag.trim()))];
+  const updatedAt = Date.now();
+  database.prepare(`INSERT INTO task_metadata(gid,tags_json,source,download_path,updated_at) VALUES (?,?,?,?,?)
+    ON CONFLICT(gid) DO UPDATE SET tags_json=excluded.tags_json, source=excluded.source,
+    download_path=excluded.download_path, updated_at=excluded.updated_at`).run(gid, JSON.stringify(uniqueTags), source, downloadPath ?? null, updatedAt);
+  return { gid, tags: uniqueTags, source, downloadPath: downloadPath ?? null, updatedAt };
+});
+
+app.delete<{ Params: { gid: string } }>("/api/integrations/v1/tasks/:gid", async (request) => {
+  database.prepare("DELETE FROM task_metadata WHERE gid = ?").run(request.params.gid);
+  return { gid: request.params.gid, deleted: true };
+});
 
 app.get("/api/auth/status", async () => ({ setupRequired: !adminConfigured() }));
 
@@ -374,14 +429,17 @@ app.get("/api/tasks", async () => {
     rpc<AriaStatus[]>("tellWaiting", [0, 1_000, fields]),
     rpc<AriaStatus[]>("tellStopped", [0, 1_000, fields]),
   ]);
-  const current = [...active, ...waiting, ...stopped].map(task);
+  const current = [...active, ...waiting, ...stopped].map((status) => {
+    const item = task(status);
+    return { ...item, metadata: metadataFor(item.id) };
+  });
   const observedAt = Date.now();
   const upsertMany = database.transaction((items: ReturnType<typeof task>[]) => {
     for (const item of items) saveHistory.run(item.id, JSON.stringify(item), observedAt);
   });
   upsertMany(current);
   const currentIds = new Set(current.map((item) => item.id));
-  const history = loadHistory().filter((item) => !currentIds.has(item.id));
+  const history = loadHistory().filter((item) => !currentIds.has(item.id)).map((item) => ({ ...item, metadata: metadataFor(item.id) }));
   return { tasks: [...current, ...history] };
 });
 

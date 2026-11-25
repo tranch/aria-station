@@ -15,6 +15,7 @@ The current milestone provides a working React frontend and same-origin Node.js 
 - Viewing task files and BitTorrent peers on demand
 - Selecting torrent files and setting a task download limit
 - Live refresh, connection diagnostics, and aria2 WebSocket notifications
+- Persistent task tags and path metadata for external integrations
 
 First launch creates a local administrator account. Passwords are stored as Argon2id hashes, authenticated sessions use HttpOnly cookies, and observed task history is stored in SQLite independently of aria2.
 
@@ -34,6 +35,8 @@ First launch creates a local administrator account. Passwords are stored as Argo
 ```
 
 The browser only talks to the web service. The service owns the aria2 RPC secret and exposes a controlled API to the frontend.
+
+Aria Station persists task metadata independently of aria2 so tags and path mappings survive service restarts. External download managers can use the authenticated API documented in [the task metadata contract](docs/task-metadata-api.md). MoviePilot is one possible client; Aria Station's own downloads remain usable without an integration client. The API token is separate from the aria2 RPC secret.
 
 ## Requirements
 
